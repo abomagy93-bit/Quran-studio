@@ -47,16 +47,16 @@ const ReciterCard = React.memo(({
 }) => (
   <button
     onClick={onClick}
-    className="group relative flex items-center gap-5 p-6 bg-white/5 border border-white/5 rounded-[2rem] hover:bg-white/10 hover:border-gold-primary/30 transition-all text-right"
+    className="group relative flex items-center gap-4 sm:gap-5 p-4 sm:p-6 bg-white/5 border border-white/5 rounded-[1.5rem] sm:rounded-[2rem] hover:bg-white/10 hover:border-gold-primary/30 transition-all text-right w-full will-change-transform"
   >
-    <div className="w-14 h-14 rounded-2xl bg-gold-primary/10 flex items-center justify-center text-2xl font-black text-gold-primary group-hover:bg-gold-primary group-hover:text-black transition-all">
+    <div className="w-12 h-12 sm:w-14 sm:h-14 shrink-0 rounded-xl sm:rounded-2xl bg-gold-primary/10 flex items-center justify-center text-xl sm:text-2xl font-black text-gold-primary group-hover:bg-gold-primary group-hover:text-black transition-all">
       {reciter.name[0]}
     </div>
-    <div className="flex-1 min-w-0">
-      <p className="font-black text-lg truncate group-hover:text-gold-primary transition-colors">{reciter.name}</p>
-      <p className="text-[10px] text-white/30 uppercase tracking-widest font-bold">{reciter.letter}</p>
+    <div className="flex-1 min-w-0 py-1">
+      <p className="font-bold text-base sm:text-lg md:text-xl leading-tight group-hover:text-gold-primary transition-colors break-words">{reciter.name}</p>
+      <p className="text-[10px] sm:text-xs text-white/30 uppercase tracking-widest font-bold mt-1">{reciter.letter}</p>
     </div>
-    <ChevronLeft className={`w-5 h-5 text-white/20 group-hover:text-gold-primary transition-all ${language === 'ar' ? '' : 'rotate-180'}`} />
+    <ChevronLeft className={`w-5 h-5 shrink-0 text-white/20 group-hover:text-gold-primary transition-all ${language === 'ar' ? '' : 'rotate-180'}`} />
   </button>
 ));
 
@@ -75,22 +75,22 @@ const SurahCard = React.memo(({
 }) => (
   <button
     onClick={onClick}
-    className={`group relative flex items-center gap-5 p-5 rounded-[1.5rem] border transition-all ${
+    className={`group relative flex items-center gap-4 sm:gap-5 p-4 sm:p-5 rounded-xl sm:rounded-[1.5rem] border transition-all w-full will-change-transform ${
       isSelected
         ? 'bg-gold-primary/10 border-gold-primary text-gold-primary'
         : 'bg-white/5 border-white/5 hover:border-white/20 hover:bg-white/10'
     }`}
   >
-    <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-sm font-black transition-all ${
+    <div className={`w-10 h-10 sm:w-12 sm:h-12 shrink-0 rounded-lg sm:rounded-xl flex items-center justify-center text-xs sm:text-sm font-black transition-all ${
       isSelected
         ? 'bg-gold-primary text-black'
         : 'bg-white/10 group-hover:bg-gold-primary group-hover:text-black'
     }`}>
       {surah.id}
     </div>
-    <div className="text-right flex-1">
-      <p className="font-black text-lg">{language === 'ar' ? surah.name : surah.englishName}</p>
-      <p className="text-[10px] opacity-40 font-bold uppercase tracking-widest">
+    <div className="text-right flex-1 min-w-0 py-1">
+      <p className="font-bold text-base sm:text-lg md:text-xl leading-tight break-words">{language === 'ar' ? surah.name : surah.englishName}</p>
+      <p className="text-[10px] sm:text-xs opacity-40 font-bold uppercase tracking-widest mt-1">
         {surah.revelationType === 'Meccan' ? t.meccan : t.medinan} • {surah.numberOfAyahs} {t.ayahs}
       </p>
     </div>
@@ -102,8 +102,17 @@ export default function App() {
   const t = TRANSLATIONS[language];
   
   const [reciters, setReciters] = useState<Reciter[]>([]);
-  const [filteredReciters, setFilteredReciters] = useState<Reciter[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  
+  const filteredReciters = useMemo(() => {
+    const query = searchQuery.toLowerCase().trim();
+    if (!query) return reciters;
+    return reciters.filter(r => 
+      r.name.toLowerCase().includes(query) || 
+      r.letter.toLowerCase().includes(query)
+    );
+  }, [reciters, searchQuery]);
+
   const [selectedReciter, setSelectedReciter] = useState<Reciter | null>(null);
   const [selectedSurah, setSelectedSurah] = useState<Surah | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -161,6 +170,17 @@ export default function App() {
   // Fetch reciters
   useEffect(() => {
     const fetchReciters = async () => {
+      const cacheKey = `reciters_${language}`;
+      const cachedData = localStorage.getItem(cacheKey);
+      const cacheTime = localStorage.getItem(`${cacheKey}_time`);
+      
+      // Cache for 24 hours
+      if (cachedData && cacheTime && Date.now() - parseInt(cacheTime) < 86400000) {
+        setReciters(JSON.parse(cachedData));
+        setIsLoading(false);
+        return;
+      }
+
       setIsLoading(true);
       try {
         // Always fetch Arabic to get the priority IDs and stable order
@@ -257,7 +277,8 @@ export default function App() {
         });
 
         setReciters(sorted);
-        setFilteredReciters(sorted);
+        localStorage.setItem(cacheKey, JSON.stringify(sorted));
+        localStorage.setItem(`${cacheKey}_time`, Date.now().toString());
         setIsLoading(false);
       } catch (error) {
         console.error('Error fetching reciters:', error);
@@ -279,14 +300,6 @@ export default function App() {
       if (updated) setSelectedReciter(updated);
     }
   }, [reciters]);
-
-  // Filter reciters
-  useEffect(() => {
-    const filtered = reciters.filter(r => 
-      r.name.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-    setFilteredReciters(filtered);
-  }, [searchQuery, reciters]);
 
   // Handle Audio
   const togglePlay = React.useCallback(() => {
@@ -419,6 +432,7 @@ export default function App() {
       audioRef.current = new Audio();
       audioRef.current.volume = audioState.volume;
       audioRef.current.playbackRate = audioState.playbackRate;
+      audioRef.current.preload = 'auto';
     }
 
     const audio = audioRef.current;
@@ -514,7 +528,7 @@ export default function App() {
   };
 
   return (
-    <div className={`min-h-screen bg-black text-white font-sans selection:bg-cyan-primary/30 ${language === 'ar' ? 'rtl' : 'ltr'}`} dir={language === 'ar' ? 'rtl' : 'ltr'}>
+    <div className={`min-h-screen bg-black text-white selection:bg-cyan-primary/30 ${language === 'ar' ? 'rtl' : 'ltr'}`} dir={language === 'ar' ? 'rtl' : 'ltr'}>
       {/* Background Glow */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <div className="absolute -top-[10%] -right-[10%] w-[50%] h-[50%] bg-cyan-primary/5 blur-[150px] rounded-full" />
@@ -523,14 +537,14 @@ export default function App() {
 
       {/* Header */}
       <header className="sticky top-0 z-50 bg-black/90 backdrop-blur-2xl border-b border-white/5">
-        <div className="max-w-7xl mx-auto px-4 h-16 sm:h-20 flex items-center justify-between">
-          <div className="flex items-center gap-2 sm:gap-3">
-            <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gold-primary rounded-lg sm:rounded-xl flex items-center justify-center shadow-lg shadow-gold-primary/20">
-              <Music className="text-black w-4 h-4 sm:w-6 sm:h-6" />
+        <div className="max-w-7xl mx-auto px-4 h-16 sm:h-24 flex items-center justify-between">
+          <div className="flex items-center gap-3 sm:gap-4">
+            <div className="w-10 h-10 sm:w-14 sm:h-14 bg-gold-primary rounded-xl sm:rounded-2xl flex items-center justify-center shadow-lg shadow-gold-primary/20">
+              <Music className="text-black w-5 h-5 sm:w-8 sm:h-8" />
             </div>
             <div className="flex flex-col">
-              <h1 className="text-lg sm:text-xl font-black tracking-tight text-gold-primary leading-tight">{t.title}</h1>
-              <p className="text-[8px] sm:text-[10px] text-cyan-primary uppercase tracking-widest font-bold">{t.subtitle}</p>
+              <h1 className="text-xl sm:text-3xl font-black tracking-tight text-gold-primary leading-tight">{t.title}</h1>
+              <p className="text-[10px] sm:text-xs text-cyan-primary uppercase tracking-widest font-bold">{t.subtitle}</p>
             </div>
           </div>
 
@@ -716,19 +730,17 @@ export default function App() {
               
               {/* Current Info */}
               <div className="flex items-center gap-6">
-                <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-[1.5rem] overflow-hidden shadow-2xl shadow-gold-primary/10 group">
-                  <img 
-                    src={audioState.isRadio ? 'https://picsum.photos/seed/radio/200/200' : `https://picsum.photos/seed/${selectedReciter?.id}/200/200`} 
-                    className={`w-full h-full object-cover transition-transform duration-[3s] ${audioState.isPlaying ? 'scale-125' : ''}`}
-                    alt=""
-                  />
+                <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-[1.5rem] overflow-hidden shadow-2xl shadow-gold-primary/10 group bg-gradient-to-br from-gold-primary/20 to-cyan-primary/20">
+                  <div className="absolute inset-0 flex items-center justify-center text-gold-primary/40 font-black text-2xl">
+                    {audioState.isRadio ? '📻' : selectedReciter?.name[0]}
+                  </div>
                   <div className="absolute inset-0 bg-gold-primary/10 mix-blend-overlay" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h3 className="font-black text-xl truncate text-gold-primary">
+                  <h3 className="font-bold text-xl sm:text-2xl break-words text-gold-primary leading-tight">
                     {audioState.isRadio ? t.cairoRadio : `${language === 'ar' ? 'سورة' : 'Surah'} ${language === 'ar' ? selectedSurah?.name : selectedSurah?.englishName}`}
                   </h3>
-                  <p className="text-cyan-primary text-sm truncate font-bold mt-1">
+                  <p className="text-cyan-primary text-sm sm:text-base font-bold mt-1 break-words">
                     {audioState.isRadio ? 'إذاعة القرآن الكريم' : selectedReciter?.name}
                   </p>
                   {!audioState.isRadio && selectedSurah && (
