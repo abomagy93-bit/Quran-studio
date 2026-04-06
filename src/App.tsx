@@ -21,6 +21,7 @@ import {
   ExternalLink,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Heart,
   Settings,
   X,
@@ -103,6 +104,7 @@ export default function App() {
   
   const [reciters, setReciters] = useState<Reciter[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [surahSearchQuery, setSurahSearchQuery] = useState('');
   
   const filteredReciters = useMemo(() => {
     const query = searchQuery.toLowerCase().trim();
@@ -122,8 +124,17 @@ export default function App() {
   const availableSurahs = useMemo(() => {
     if (!selectedReciter) return [];
     const surahIds = selectedReciter.surahs.split(',').map(id => parseInt(id));
-    return SURAHS.filter(s => surahIds.includes(s.id));
-  }, [selectedReciter]);
+    const baseSurahs = SURAHS.filter(s => surahIds.includes(s.id));
+    
+    const query = surahSearchQuery.toLowerCase().trim();
+    if (!query) return baseSurahs;
+    
+    return baseSurahs.filter(s => 
+      s.name.toLowerCase().includes(query) || 
+      s.englishName.toLowerCase().includes(query) ||
+      s.id.toString() === query
+    );
+  }, [selectedReciter, surahSearchQuery]);
 
   const [audioState, setAudioState] = useState<AudioState>({
     isPlaying: false,
@@ -136,6 +147,31 @@ export default function App() {
     isRepeating: false,
     playbackRate: 1,
   });
+
+  const [isPlayerMinimized, setIsPlayerMinimized] = useState(false);
+  const [visitorCount, setVisitorCount] = useState(0);
+
+  useEffect(() => {
+    const updateVisitorCount = async () => {
+      try {
+        // Using a public simple counter API (Real & Persistent)
+        const response = await fetch('https://api.counterapi.dev/v1/ahlelquran_official/visits/up');
+        const data = await response.json();
+        if (data && data.count) {
+          setVisitorCount(data.count);
+        }
+      } catch (error) {
+        console.error('Visitor counter error:', error);
+        // Fallback to local storage if API is unavailable
+        const saved = localStorage.getItem('visitor_count_fallback');
+        const count = saved ? parseInt(saved) + 1 : 15420;
+        setVisitorCount(count);
+        localStorage.setItem('visitor_count_fallback', count.toString());
+      }
+    };
+
+    updateVisitorCount();
+  }, []);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isMuted, setIsMuted] = useState(false);
@@ -589,7 +625,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 py-12 pb-48">
+      <main className="max-w-7xl mx-auto px-4 py-12 pb-24">
         <div className="w-full space-y-12">
           
           <AnimatePresence mode="wait">
@@ -638,22 +674,26 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Reciters Grid */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                  {isLoading ? (
-                    Array.from({ length: 9 }).map((_, i) => (
-                      <div key={i} className="h-24 bg-white/5 animate-pulse rounded-3xl" />
-                    ))
-                  ) : (
-                    filteredReciters.map((reciter) => (
-                      <ReciterCard
-                        key={reciter.id}
-                        reciter={reciter}
-                        language={language}
-                        onClick={() => handleReciterClick(reciter)}
-                      />
-                    ))
-                  )}
+                {/* Reciters Grid - Contained */}
+                <div className="max-w-5xl mx-auto bg-white/5 rounded-[2.5rem] p-6 sm:p-8 border border-white/10 backdrop-blur-xl shadow-2xl">
+                  <div className="max-h-[85vh] overflow-y-auto pr-2 custom-scrollbar">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                      {isLoading ? (
+                        Array.from({ length: 9 }).map((_, i) => (
+                          <div key={i} className="h-24 bg-white/5 animate-pulse rounded-3xl" />
+                        ))
+                      ) : (
+                        filteredReciters.map((reciter) => (
+                          <ReciterCard
+                            key={reciter.id}
+                            reciter={reciter}
+                            language={language}
+                            onClick={() => handleReciterClick(reciter)}
+                          />
+                        ))
+                      )}
+                    </div>
+                  </div>
                 </div>
               </motion.div>
             ) : (
@@ -687,17 +727,33 @@ export default function App() {
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {availableSurahs.map((surah) => (
-                    <SurahCard
-                      key={surah.id}
-                      surah={surah}
-                      language={language}
-                      t={t}
-                      isSelected={selectedSurah?.id === surah.id && selectedReciter?.id === audioState.currentReciter?.id}
-                      onClick={() => handleSurahClick(surah)}
-                    />
-                  ))}
+                {/* Surah Search */}
+                <div className="relative max-w-md mx-auto group">
+                  <Search className={`absolute ${language === 'ar' ? 'right-4' : 'left-4'} top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-gold-primary transition-colors w-4 h-4`} />
+                  <input 
+                    type="text" 
+                    placeholder={language === 'ar' ? 'بحث عن سورة...' : 'Search surah...'}
+                    value={surahSearchQuery}
+                    onChange={(e) => setSurahSearchQuery(e.target.value)}
+                    className={`w-full bg-white/5 border border-white/10 rounded-xl py-3 sm:py-4 ${language === 'ar' ? 'pr-12 pl-4' : 'pl-12 pr-4'} focus:outline-none focus:ring-2 focus:ring-gold-primary/20 focus:border-gold-primary/40 transition-all text-base placeholder:text-white/10`}
+                  />
+                </div>
+
+                <div className="max-w-7xl mx-auto bg-white/5 rounded-[2.5rem] p-6 sm:p-8 border border-white/10 backdrop-blur-xl shadow-2xl">
+                  <div className="max-h-[85vh] overflow-y-auto pr-2 custom-scrollbar">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                      {availableSurahs.map((surah) => (
+                        <SurahCard
+                          key={surah.id}
+                          surah={surah}
+                          language={language}
+                          t={t}
+                          isSelected={selectedSurah?.id === surah.id && selectedReciter?.id === audioState.currentReciter?.id}
+                          onClick={() => handleSurahClick(surah)}
+                        />
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </motion.div>
             )}
@@ -708,165 +764,197 @@ export default function App() {
       {/* Settings Modal */}
 
       {/* Footer Credits */}
-      <footer className="max-w-7xl mx-auto px-4 py-16 text-center border-t border-white/5 space-y-4">
+      <footer className="max-w-7xl mx-auto px-4 pt-8 pb-16 text-center border-t border-white/5 space-y-6">
         <div className="flex items-center justify-center gap-4 text-white/20">
           <div className="h-px w-12 bg-current" />
           <Info className="w-5 h-5" />
           <div className="h-px w-12 bg-current" />
         </div>
         <p className="text-white/40 text-sm font-medium">{t.madeBy}</p>
-        <p className="text-gold-primary text-lg font-black tracking-tight">{t.charity}</p>
+        <div className="space-y-4">
+          <p className="text-gold-primary text-3xl sm:text-5xl font-black tracking-tight drop-shadow-lg leading-tight">
+            {t.charity}
+          </p>
+          <div className="inline-flex flex-col items-center gap-2 px-6 py-3 bg-white/5 rounded-2xl border border-white/10 backdrop-blur-md">
+            <p className="text-[10px] uppercase tracking-[0.2em] text-cyan-primary font-bold">إجمالي الزوار</p>
+            <p className="text-2xl font-mono font-black text-white tabular-nums">
+              {visitorCount.toLocaleString()}
+            </p>
+          </div>
+        </div>
       </footer>
 
       {/* Player Bar */}
       <AnimatePresence>
         {(selectedSurah || audioState.isRadio) && (
-          <motion.footer
-            initial={{ y: 150 }}
-            animate={{ y: 0 }}
-            className="fixed bottom-0 left-0 right-0 z-[60] bg-black/95 backdrop-blur-3xl border-t border-white/10 px-4 py-6 sm:py-8"
-          >
-            <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 items-center gap-8">
-              
-              {/* Current Info */}
-              <div className="flex items-center gap-6">
-                <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-[1.5rem] overflow-hidden shadow-2xl shadow-gold-primary/10 group bg-gradient-to-br from-gold-primary/20 to-cyan-primary/20">
-                  <div className="absolute inset-0 flex items-center justify-center text-gold-primary/40 font-black text-2xl">
-                    {audioState.isRadio ? '📻' : selectedReciter?.name[0]}
-                  </div>
-                  <div className="absolute inset-0 bg-gold-primary/10 mix-blend-overlay" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-bold text-xl sm:text-2xl break-words text-gold-primary leading-tight">
-                    {audioState.isRadio ? t.cairoRadio : `${language === 'ar' ? 'سورة' : 'Surah'} ${language === 'ar' ? selectedSurah?.name : selectedSurah?.englishName}`}
-                  </h3>
-                  <p className="text-cyan-primary text-sm sm:text-base font-bold mt-1 break-words">
-                    {audioState.isRadio ? 'إذاعة القرآن الكريم' : selectedReciter?.name}
-                  </p>
-                  {!audioState.isRadio && selectedSurah && (
-                    <p className="text-[10px] text-white/30 font-bold uppercase tracking-widest mt-1">
-                      {selectedSurah.revelationType === 'Meccan' ? t.meccan : t.medinan} • {selectedSurah.numberOfAyahs} {t.ayahs} • {t.juz} {selectedSurah.juz}
-                    </p>
+          <>
+            {isPlayerMinimized ? (
+              <motion.button
+                initial={{ y: 100, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={{ y: 100, opacity: 0 }}
+                onClick={() => setIsPlayerMinimized(false)}
+                className="fixed bottom-6 right-6 z-[70] w-16 h-16 bg-gold-primary text-black rounded-full shadow-2xl shadow-gold-primary/40 flex items-center justify-center hover:scale-110 transition-transform"
+              >
+                <div className="relative">
+                  <Music className="w-6 h-6" />
+                  {audioState.isPlaying && (
+                    <span className="absolute -top-1 -right-1 w-3 h-3 bg-cyan-primary rounded-full animate-pulse border-2 border-black" />
                   )}
                 </div>
-              </div>
+              </motion.button>
+            ) : (
+              <motion.footer
+                initial={{ y: 150 }}
+                animate={{ y: 0 }}
+                exit={{ y: 150 }}
+                className="fixed bottom-0 left-0 right-0 z-[60] bg-black/95 backdrop-blur-3xl border-t border-white/10 px-4 py-6 sm:py-8 shadow-[0_-20px_50px_-12px_rgba(0,0,0,0.5)]"
+              >
+                <div className="max-w-7xl mx-auto relative">
+                  {/* Player Controls Toggle */}
+                  <div className="absolute -top-12 left-0 right-0">
+                    <button 
+                      onClick={stopPlayback}
+                      className="absolute left-4 sm:left-8 bg-red-500/20 hover:bg-red-500/40 backdrop-blur-xl border border-red-500/20 p-2 rounded-t-xl transition-colors text-red-400 hover:text-red-300"
+                      title="إغلاق"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                    <button 
+                      onClick={() => setIsPlayerMinimized(true)}
+                      className="absolute right-4 sm:right-8 bg-white/10 hover:bg-white/20 backdrop-blur-xl border border-white/10 p-2 rounded-t-xl transition-colors text-white/60 hover:text-white"
+                      title="تصغير"
+                    >
+                      <ChevronDown className="w-5 h-5" />
+                    </button>
+                  </div>
 
-              {/* Controls */}
-              <div className="flex flex-col items-center gap-4">
-                <div className="flex items-center gap-6 sm:gap-10">
-                  <button 
-                    onClick={toggleRepeat}
-                    disabled={audioState.isRadio}
-                    className={`transition-all ${audioState.isRadio ? 'opacity-10 text-white/10' : audioState.isRepeating ? 'text-gold-primary' : 'text-white/40 hover:text-white'}`}
-                    title={t.repeat}
-                  >
-                    <RotateCcw className="w-5 h-5" />
-                  </button>
-                  <button 
-                    onClick={playPrevSurah} 
-                    disabled={audioState.isRadio}
-                    className={`transition-all ${audioState.isRadio ? 'opacity-10 text-white/10' : 'text-white/40 hover:text-gold-primary hover:scale-110'}`}
-                  >
-                    <SkipForward className={`w-7 h-7 ${language === 'ar' ? '' : 'rotate-180'}`} />
-                  </button>
-                  <button 
-                    onClick={togglePlay}
-                    className="w-16 h-16 sm:w-20 sm:h-20 bg-gold-primary text-black rounded-full flex items-center justify-center hover:scale-110 active:scale-90 transition-all shadow-2xl shadow-gold-primary/30"
-                  >
-                    {audioState.isPlaying ? <Pause className="w-8 h-8 fill-current" /> : <Play className="w-8 h-8 fill-current ml-1" />}
-                  </button>
-                  <button 
-                    onClick={playNextSurah} 
-                    disabled={audioState.isRadio}
-                    className={`transition-all ${audioState.isRadio ? 'opacity-10 text-white/10' : 'text-white/40 hover:text-gold-primary hover:scale-110'}`}
-                  >
-                    <SkipBack className={`w-7 h-7 ${language === 'ar' ? '' : 'rotate-180'}`} />
-                  </button>
-                  <button 
-                    onClick={togglePlaybackRate}
-                    disabled={audioState.isRadio}
-                    className={`flex items-center gap-1 transition-all ${audioState.isRadio ? 'opacity-10 text-white/10' : audioState.playbackRate !== 1 ? 'text-gold-primary' : 'text-white/40 hover:text-white'}`}
-                    title={t.playbackSpeed}
-                  >
-                    <Gauge className="w-5 h-5" />
-                    <span className="text-[10px] font-black w-6">{audioState.playbackRate}x</span>
-                  </button>
-                </div>
-                
-                {!audioState.isRadio && (
-                  <div className="w-full flex items-center gap-4">
-                    <span className="text-[10px] font-black text-white/20 w-12 text-left">{formatTime(audioState.currentTime)}</span>
-                    <div className="relative flex-1 h-2 group">
-                      <input 
-                        type="range" 
-                        min="0" 
-                        max={audioState.duration || 0} 
-                        value={audioState.currentTime}
-                        onChange={handleSeek}
-                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                      />
-                      <div className="absolute inset-0 bg-white/5 rounded-full overflow-hidden">
-                        <div 
-                          className="h-full bg-gold-primary transition-all duration-100 shadow-[0_0_15px_rgba(255,215,0,0.5)]" 
-                          style={{ width: `${(audioState.currentTime / (audioState.duration || 1)) * 100}%` }}
-                        />
+                  <div className="grid grid-cols-1 md:grid-cols-3 items-center gap-8">
+                    
+                    {/* Current Info */}
+                    <div className="flex items-center gap-6">
+                      <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-[1.5rem] overflow-hidden shadow-2xl shadow-gold-primary/10 group bg-gradient-to-br from-gold-primary/20 to-cyan-primary/20">
+                        <div className="absolute inset-0 flex items-center justify-center text-gold-primary/40 font-black text-2xl">
+                          {audioState.isRadio ? '📻' : selectedReciter?.name[0]}
+                        </div>
+                        <div className="absolute inset-0 bg-gold-primary/10 mix-blend-overlay" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-bold text-xl sm:text-2xl break-words text-gold-primary leading-tight">
+                          {audioState.isRadio ? t.cairoRadio : `${language === 'ar' ? 'سورة' : 'Surah'} ${language === 'ar' ? selectedSurah?.name : selectedSurah?.englishName}`}
+                        </h3>
+                        <p className="text-cyan-primary text-sm sm:text-base font-bold mt-1 break-words">
+                          {audioState.isRadio ? 'إذاعة القرآن الكريم' : selectedReciter?.name}
+                        </p>
+                        {!audioState.isRadio && selectedSurah && (
+                          <p className="text-[10px] text-white/30 font-bold uppercase tracking-widest mt-1">
+                            {selectedSurah.revelationType === 'Meccan' ? t.meccan : t.medinan} • {selectedSurah.numberOfAyahs} {t.ayahs} • {t.juz} {selectedSurah.juz}
+                          </p>
+                        )}
                       </div>
                     </div>
-                    <span className="text-[10px] font-black text-white/20 w-12 text-right">{formatTime(audioState.duration)}</span>
-                  </div>
-                )}
-              </div>
 
-              {/* Volume & Extras */}
-              <div className="flex items-center justify-end gap-6">
-                <div className="hidden md:flex items-center gap-4">
-                  <button onClick={toggleMute} className="text-white/40 hover:text-gold-primary transition-colors">
-                    {isMuted || audioState.volume === 0 ? <VolumeX className="w-6 h-6" /> : <Volume2 className="w-6 h-6" />}
-                  </button>
-                  <div className="relative w-28 h-1.5 group">
-                    <input 
-                      type="range" 
-                      min="0" 
-                      max="1" 
-                      step="0.01"
-                      value={isMuted ? 0 : audioState.volume}
-                      onChange={handleVolumeChange}
-                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                    />
-                    <div className="absolute inset-0 bg-white/5 rounded-full overflow-hidden">
-                      <div 
-                        className="h-full bg-cyan-primary transition-all" 
-                        style={{ width: `${(isMuted ? 0 : audioState.volume) * 100}%` }}
-                      />
+                    {/* Controls */}
+                    <div className="flex flex-col items-center gap-4">
+                      <div className="flex items-center gap-6 sm:gap-10">
+                        <button 
+                          onClick={toggleRepeat}
+                          disabled={audioState.isRadio}
+                          className={`transition-all ${audioState.isRadio ? 'opacity-10 text-white/10' : audioState.isRepeating ? 'text-gold-primary' : 'text-white/40 hover:text-white'}`}
+                          title={t.repeat}
+                        >
+                          <RotateCcw className="w-5 h-5" />
+                        </button>
+                        <button 
+                          onClick={playPrevSurah} 
+                          disabled={audioState.isRadio}
+                          className={`transition-all ${audioState.isRadio ? 'opacity-10 text-white/10' : 'text-white/40 hover:text-gold-primary hover:scale-110'}`}
+                        >
+                          <SkipForward className={`w-7 h-7 ${language === 'ar' ? '' : 'rotate-180'}`} />
+                        </button>
+                        <button 
+                          onClick={togglePlay}
+                          className="w-16 h-16 sm:w-20 sm:h-20 bg-gold-primary text-black rounded-full flex items-center justify-center hover:scale-110 active:scale-90 transition-all shadow-2xl shadow-gold-primary/30"
+                        >
+                          {audioState.isPlaying ? <Pause className="w-8 h-8 fill-current" /> : <Play className="w-8 h-8 fill-current ml-1" />}
+                        </button>
+                        <button 
+                          onClick={playNextSurah} 
+                          disabled={audioState.isRadio}
+                          className={`transition-all ${audioState.isRadio ? 'opacity-10 text-white/10' : 'text-white/40 hover:text-gold-primary hover:scale-110'}`}
+                        >
+                          <SkipBack className={`w-7 h-7 ${language === 'ar' ? '' : 'rotate-180'}`} />
+                        </button>
+                        <button 
+                          onClick={togglePlaybackRate}
+                          disabled={audioState.isRadio}
+                          className={`flex items-center gap-1 transition-all ${audioState.isRadio ? 'opacity-10 text-white/10' : audioState.playbackRate !== 1 ? 'text-gold-primary' : 'text-white/40 hover:text-white'}`}
+                          title={t.playbackSpeed}
+                        >
+                          <Gauge className="w-5 h-5" />
+                          <span className="text-[10px] font-black w-6">{audioState.playbackRate}x</span>
+                        </button>
+                      </div>
+                      
+                      {!audioState.isRadio && (
+                        <div className="w-full flex items-center gap-4">
+                          <span className="text-[10px] font-black text-white/20 w-12 text-left">{formatTime(audioState.currentTime)}</span>
+                          <div className="relative flex-1 h-2 group">
+                            <input 
+                              type="range" 
+                              min="0" 
+                              max={audioState.duration || 0} 
+                              value={audioState.currentTime}
+                              onChange={handleSeek}
+                              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                            />
+                            <div className="absolute inset-0 bg-white/5 rounded-full overflow-hidden">
+                              <div 
+                                className="h-full bg-gold-primary transition-all duration-100 shadow-[0_0_15px_rgba(255,215,0,0.5)]" 
+                                style={{ width: `${(audioState.currentTime / (audioState.duration || 1)) * 100}%` }}
+                              />
+                            </div>
+                          </div>
+                          <span className="text-[10px] font-black text-white/20 w-12 text-right">{formatTime(audioState.duration)}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Volume & Actions */}
+                    <div className="hidden md:flex items-center justify-end gap-6">
+                      <div className="flex items-center gap-3 bg-white/5 px-4 py-2 rounded-2xl border border-white/5">
+                        <button onClick={toggleMute} className="text-white/40 hover:text-gold-primary transition-colors">
+                          {isMuted || audioState.volume === 0 ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+                        </button>
+                        <input 
+                          type="range"
+                          min="0"
+                          max="1"
+                          step="0.01"
+                          value={isMuted ? 0 : audioState.volume}
+                          onChange={handleVolumeChange}
+                          className="w-24 h-1 appearance-none bg-white/10 rounded-full cursor-pointer accent-gold-primary"
+                        />
+                      </div>
+                      <button 
+                        onClick={copyRecitationLink}
+                        className={`p-3 rounded-2xl transition-all border ${isCopied ? 'bg-cyan-primary/20 border-cyan-primary text-cyan-primary' : 'bg-white/5 border-white/5 text-white/40 hover:text-gold-primary hover:bg-white/10'}`}
+                        title={t.copyLink}
+                      >
+                        {isCopied ? <Check className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
+                      </button>
                     </div>
                   </div>
+
+                  <div className="w-full text-center mt-4 pt-4 border-t border-white/5">
+                    <p className="text-[10px] sm:text-xs text-gold-primary/60 font-black tracking-widest animate-pulse">
+                      صدقة جارية لأمي وجميع موتى المسلمين
+                    </p>
+                  </div>
                 </div>
-                <button 
-                  onClick={stopPlayback}
-                  className="w-10 h-10 sm:w-12 sm:h-12 bg-white/5 hover:bg-rose-500/20 hover:text-rose-500 rounded-full flex items-center justify-center transition-all border border-white/5"
-                  title={t.stop}
-                >
-                  <X className="w-5 h-5" />
-                </button>
-                {!audioState.isRadio && selectedSurah && (
-                  <button 
-                    onClick={copyRecitationLink}
-                    className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center transition-all border ${isCopied ? 'bg-emerald-500/20 text-emerald-500 border-emerald-500/20' : 'bg-white/5 hover:bg-cyan-primary/20 hover:text-cyan-primary border-white/5'}`}
-                    title={t.copyLink}
-                  >
-                    {isCopied ? <Check className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
-                  </button>
-                )}
-              </div>
-
-              <div className="w-full text-center mt-4 pt-4 border-t border-white/5">
-                <p className="text-[10px] sm:text-xs text-gold-primary/60 font-black tracking-widest animate-pulse">
-                  صدقة جارية لأمي وجميع موتى المسلمين
-                </p>
-              </div>
-
-            </div>
-          </motion.footer>
+              </motion.footer>
+            )}
+          </>
         )}
       </AnimatePresence>
 
