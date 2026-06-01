@@ -22,6 +22,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronDown,
+  ChevronUp,
   Heart,
   Settings,
   X,
@@ -31,7 +32,8 @@ import {
   RotateCcw,
   Gauge,
   Copy,
-  Check
+  Check,
+  AlertCircle
 } from 'lucide-react';
 import { Reciter, Surah, AudioState, Language } from './types';
 import { SURAHS, EXTERNAL_LINKS, TRANSLATIONS } from './constants';
@@ -100,10 +102,28 @@ const SurahCard = React.memo(({
 ));
 
 export default function App() {
-  const [language, setLanguage] = useState<Language>('ar');
+  const [language, setLanguage] = useState<Language>(() => {
+    try {
+      const saved = localStorage.getItem('language');
+      return (saved === 'en' || saved === 'tr') ? saved : 'ar';
+    } catch {
+      return 'ar';
+    }
+  });
   const t = TRANSLATIONS[language];
   
-  const [reciters, setReciters] = useState<Reciter[]>([]);
+  const [reciters, setReciters] = useState<Reciter[]>(() => {
+    try {
+      const savedLang = localStorage.getItem('language') || 'ar';
+      const cacheKey = `reciters_${savedLang}_v4`;
+      const cachedData = localStorage.getItem(cacheKey);
+      const cacheTime = localStorage.getItem(`${cacheKey}_time`);
+      if (cachedData && cacheTime && Date.now() - parseInt(cacheTime) < 86400000) {
+        return JSON.parse(cachedData);
+      }
+    } catch {}
+    return [];
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [surahSearchQuery, setSurahSearchQuery] = useState('');
   
@@ -118,7 +138,16 @@ export default function App() {
 
   const [selectedReciter, setSelectedReciter] = useState<Reciter | null>(null);
   const [selectedSurah, setSelectedSurah] = useState<Surah | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(() => {
+    try {
+      const savedLang = localStorage.getItem('language') || 'ar';
+      const cacheKey = `reciters_${savedLang}_v4`;
+      const cachedData = localStorage.getItem(cacheKey);
+      const cacheTime = localStorage.getItem(`${cacheKey}_time`);
+      return !(cachedData && cacheTime && Date.now() - parseInt(cacheTime) < 86400000);
+    } catch {}
+    return true;
+  });
   const [isWakeLockActive, setIsWakeLockActive] = useState(false);
   const wakeLockRef = useRef<any>(null);
   
@@ -153,6 +182,7 @@ export default function App() {
   const [visitorCount, setVisitorCount] = useState(0);
   const [showFacebookOverlay, setShowFacebookOverlay] = useState(false);
   const [isUrlCopied, setIsUrlCopied] = useState(false);
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
 
   useEffect(() => {
     const ua = navigator.userAgent || navigator.vendor || (window as any).opera || '';
@@ -169,14 +199,14 @@ export default function App() {
     }
   }, []);
 
+  const [isRadioScheduleVisible, setIsRadioScheduleVisible] = useState(false);
+
   const [resumeState, setResumeState] = useState<{
     surah: Surah | null;
     reciter: Reciter | null;
     isRadio: boolean;
     time: number;
-  } | null>(null);
-
-  useEffect(() => {
+  } | null>(() => {
     try {
       const savedSurah = localStorage.getItem('persist_audio_surah');
       const savedReciter = localStorage.getItem('persist_audio_reciter');
@@ -184,17 +214,18 @@ export default function App() {
       const savedTime = localStorage.getItem('persist_audio_time');
 
       if (savedIsRadio === 'true' || (savedSurah && savedReciter)) {
-        setResumeState({
+        return {
           surah: savedSurah && savedSurah !== 'null' ? JSON.parse(savedSurah) : null,
           reciter: savedReciter && savedReciter !== 'null' ? JSON.parse(savedReciter) : null,
           isRadio: savedIsRadio === 'true',
           time: savedTime ? parseFloat(savedTime) : 0
-        });
+        };
       }
     } catch (e) {
       console.error('Failed to parse persistent state', e);
     }
-  }, []);
+    return null;
+  });
 
   // Reset scroll position to top when entering or leaving a reciter page / mushaf view
   useEffect(() => {
@@ -264,7 +295,7 @@ export default function App() {
   // Fetch reciters
   useEffect(() => {
     const fetchReciters = async () => {
-      const cacheKey = `reciters_${language}_v3`;
+      const cacheKey = `reciters_${language}_v4`;
       const cachedData = localStorage.getItem(cacheKey);
       const cacheTime = localStorage.getItem(`${cacheKey}_time`);
       
@@ -286,12 +317,14 @@ export default function App() {
           'محمد صديق المنشاوي',
           'عبدالباسط عبدالصمد',
           'محمود خليل الحصري',
+          'كامل يوسف البهتيمي',
+          'راغب مصطفى غلوش',
+          'أحمد الصاروطي',
           'محمود علي البنا',
           'مصطفى إسماعيل',
           'محمد رفعت',
           'رشاد درويش',
           'محمد محمود الطبلاوي',
-          'كامل يوسف البهتيمي',
           'أحمد نعينع',
           'مشاري العفاسي',
           'أحمد العجمي',
@@ -305,6 +338,14 @@ export default function App() {
         const priorityIds = priorityArabicNames.map(name => 
           arData.reciters.find((r: any) => r.name.includes(name))?.id
         ).filter(id => id !== undefined);
+
+        // elegance classical grouping layout: insert virtual IDs after Al-Husary (115)
+        const husaryIdx = priorityIds.indexOf(115);
+        if (husaryIdx !== -1) {
+          priorityIds.splice(husaryIdx + 1, 0, 90001, 90002, 90003, 90004);
+        } else {
+          priorityIds.push(90001, 90002, 90003, 90004);
+        }
 
         // Explicitly add requested key reciters to top priority
         [54, 44, 115, 120, 117].forEach(id => {
@@ -415,6 +456,36 @@ export default function App() {
               letter: r.letter
             });
           }
+        });
+
+        // Inject Custom Classical Egyptian Reciters manually after api results
+        allReciters.push({
+          id: 90001,
+          name: language === 'ar' ? 'الشيخ كامل يوسف البهتيمي (مجود)' : 'Sheikh Kamel Yusuf Al-Bahtimi (Mujawwad)',
+          server: 'https://archive.org/download/kamel-yousef-al-bahtimi/',
+          surahs: Array.from({length: 114}, (_, i) => i + 1).join(','),
+          letter: 'ك'
+        });
+        allReciters.push({
+          id: 90002,
+          name: language === 'ar' ? 'الشيخ راغب مصطفى غلوش (مجود)' : 'Sheikh Ragheb Mustafa Ghalwash (Mujawwad)',
+          server: 'https://archive.org/download/raghib-mustafa-ghalwash/',
+          surahs: Array.from({length: 114}, (_, i) => i + 1).join(','),
+          letter: 'ر'
+        });
+        allReciters.push({
+          id: 90003,
+          name: language === 'ar' ? 'الشيخ أحمد الصاروطي (مرتل)' : 'Sheikh Ahmad Al-Sarouti (Murattal)',
+          server: 'https://archive.org/download/ahmad-al-saroti/',
+          surahs: Array.from({length: 114}, (_, i) => i + 1).join(','),
+          letter: 'أ'
+        });
+        allReciters.push({
+          id: 90004,
+          name: language === 'ar' ? 'الشيخ رشاد درويش (مرتل)' : 'Sheikh Rashad Darwish (Murattal)',
+          server: 'https://archive.org/download/rashad-darwish/',
+          surahs: Array.from({length: 114}, (_, i) => i + 1).join(','),
+          letter: 'ر'
         });
 
         const sorted = [...allReciters].sort((a, b) => {
@@ -716,16 +787,29 @@ export default function App() {
       }
     };
 
+    const handleError = () => {
+      if (selectedSurah && selectedReciter && (selectedReciter.id >= 90000 || selectedReciter.name.includes("البهتيمي") || selectedReciter.name.includes("الصاروطي") || selectedReciter.name.includes("غلوش"))) {
+        setPlaybackError(language === 'ar' 
+          ? "تنبيه: عذراً، التسجيل الكامل والواضح لهذه السورة من نوادر التلاوات غير متاح حالياً لهذه المدرسة." 
+          : "Notice: Apologies, the full studio recording of this Surah is currently unavailable for this classical reciter."
+        );
+        setTimeout(() => setPlaybackError(null), 6000);
+      }
+      setAudioState(prev => ({ ...prev, isPlaying: false }));
+    };
+
     audio.addEventListener('timeupdate', handleTimeUpdate);
     audio.addEventListener('loadedmetadata', handleLoadedMetadata);
     audio.addEventListener('ended', handleEnded);
+    audio.addEventListener('error', handleError);
 
     return () => {
       audio.removeEventListener('timeupdate', handleTimeUpdate);
       audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
       audio.removeEventListener('ended', handleEnded);
+      audio.removeEventListener('error', handleError);
     };
-  }, [playNextSurah, audioState.volume]);
+  }, [playNextSurah, audioState.volume, selectedSurah, selectedReciter, language]);
 
   // Media Session API for background playback
   useEffect(() => {
@@ -973,8 +1057,53 @@ export default function App() {
                   )}
                 </div>
 
-                {/* Live program segments from Egypt Quran Radio */}
-                <RadioSchedule language={language} />
+                {/* Live program segments from Egypt Quran Radio (Collapsible) */}
+                <div className="w-full max-w-4xl mx-auto">
+                  <motion.button
+                    whileHover={{ scale: 1.01 }}
+                    whileTap={{ scale: 0.99 }}
+                    onClick={() => setIsRadioScheduleVisible(!isRadioScheduleVisible)}
+                    className="w-full flex items-center justify-between p-5 rounded-3xl border border-white/5 bg-white/[0.02] hover:bg-white/[0.04] transition-all relative overflow-hidden group select-none"
+                  >
+                    {/* Glowing golden border effect on hover */}
+                    <div className="absolute inset-x-0 bottom-0 h-[2px] bg-gradient-to-r from-cyan-primary/0 via-gold-primary/30 to-cyan-primary/0 scale-x-0 group-hover:scale-x-100 transition-transform duration-500" />
+                    
+                    <div className="flex items-center gap-4 text-right">
+                      <div className="p-3 rounded-2xl bg-gold-primary/10 text-gold-primary group-hover:bg-gold-primary/20 transition-all">
+                        <Radio className="w-5 h-5 sm:w-6 sm:h-6" />
+                      </div>
+                      <div>
+                        <p className="font-black text-sm sm:text-base text-gold-primary tracking-tight">
+                          {language === 'ar' ? 'خريطة برامج وتواقيت إذاعة القرآن الكريم المباشرة' : 'Live Cairo Quran Radio Program Schedule & Timing'}
+                        </p>
+                        <p className="text-[10px] sm:text-xs text-white/50 font-medium mt-0.5">
+                          {language === 'ar' 
+                            ? (isRadioScheduleVisible ? 'اضغط هنا لطي الخريطة بالكامل وتوفير المساحة' : 'تضمّن تلاوات السحر، أحاديث الأزهر والتفاسير النادرة. اضغط للعرض والمتابعة الفورية للبرامج الآن')
+                            : (isRadioScheduleVisible ? 'Click to collapse the complete schedule' : 'Highlights dawn recitations, Al-Azhar podcasts, and rare Tafseer. Click to expand')
+                          }
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="p-2 bg-white/5 rounded-xl text-white/40 group-hover:text-gold-primary transition-all shrink-0">
+                      {isRadioScheduleVisible ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                    </div>
+                  </motion.button>
+                  
+                  <AnimatePresence>
+                    {isRadioScheduleVisible && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0, marginTop: 0 }}
+                        animate={{ opacity: 1, height: 'auto', marginTop: 16 }}
+                        exit={{ opacity: 0, height: 0, marginTop: 0 }}
+                        transition={{ duration: 0.3, ease: 'easeOut' }}
+                        className="overflow-hidden"
+                      >
+                        <RadioSchedule language={language} />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
 
                 {/* Search Section */}
                 <div className="text-center space-y-3 sm:space-y-4">
@@ -1358,6 +1487,32 @@ export default function App() {
                 صدقة جارية لأمي وجميع موتى المسلمين
               </div>
             </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {playbackError && (
+          <motion.div 
+            initial={{ opacity: 0, y: 50, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 max-w-md w-[calc(100%-2rem)] bg-zinc-950/95 border border-gold-primary/30 rounded-2xl p-4 shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex items-start gap-4 backdrop-blur-md"
+          >
+            <div className="p-2 bg-gold-primary/10 rounded-xl text-gold-primary shrink-0">
+              <AlertCircle className="w-5 h-5 animate-pulse" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs sm:text-sm font-bold text-white/95 leading-relaxed text-right">
+                {playbackError}
+              </p>
+            </div>
+            <button 
+              onClick={() => setPlaybackError(null)}
+              className="text-white/40 hover:text-white/80 transition-all p-1 self-start shrink-0"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </motion.div>
         )}
       </AnimatePresence>

@@ -511,20 +511,18 @@ export function RadioSchedule({ language }: { language: Language }) {
 
   // Check if a program slot is already finished for today
   const isSlotFinished = (slot: ProgramSlot, currentHours: number, currentMinutes: number) => {
-    // If it is active, it is NOT finished
+    // If it is currently active, it is definitely NOT finished
     if (isSlotActive(slot, currentHours, currentMinutes)) {
       return false;
     }
     
     const currentTotal = currentHours * 60 + currentMinutes;
     const startTotal = slot.startHour * 60 + slot.startMinute;
-    let endTotal = slot.endHour * 60 + slot.endMinute;
 
-    if (startTotal <= endTotal) {
-      return currentTotal >= endTotal;
-    } else {
-      return currentTotal >= endTotal && currentTotal < startTotal;
-    }
+    // Inside a 24-hour calendar day, a repeating slot is considered finished 
+    // if the day's time has progressed past or equal to its start time 
+    // AND it is no longer active.
+    return currentTotal >= startTotal;
   };
 
   // Filter program slots that have finished to only show remaining/upcoming programs
