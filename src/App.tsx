@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import { Reciter, Surah, AudioState, Language } from './types';
 import { SURAHS, EXTERNAL_LINKS, TRANSLATIONS } from './constants';
+import { RadioSchedule } from './components/RadioSchedule';
 
 // Memoized Components for Performance
 const ReciterCard = React.memo(({ 
@@ -959,6 +960,9 @@ export default function App() {
                     </div>
                   )}
                 </div>
+
+                {/* Live program segments from Egypt Quran Radio */}
+                <RadioSchedule language={language} />
 
                 {/* Search Section */}
                 <div className="text-center space-y-3 sm:space-y-4">
