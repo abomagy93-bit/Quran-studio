@@ -150,6 +150,33 @@ export default function App() {
 
   const [isPlayerMinimized, setIsPlayerMinimized] = useState(false);
   const [visitorCount, setVisitorCount] = useState(0);
+  const [resumeState, setResumeState] = useState<{
+    surah: Surah | null;
+    reciter: Reciter | null;
+    isRadio: boolean;
+    time: number;
+  } | null>(null);
+
+  useEffect(() => {
+    try {
+      const savedSurah = localStorage.getItem('persist_audio_surah');
+      const savedReciter = localStorage.getItem('persist_audio_reciter');
+      const savedIsRadio = localStorage.getItem('persist_audio_is_radio');
+      const savedTime = localStorage.getItem('persist_audio_time');
+
+      if (savedIsRadio === 'true' || (savedSurah && savedReciter)) {
+        setResumeState({
+          surah: savedSurah && savedSurah !== 'null' ? JSON.parse(savedSurah) : null,
+          reciter: savedReciter && savedReciter !== 'null' ? JSON.parse(savedReciter) : null,
+          isRadio: savedIsRadio === 'true',
+          time: savedTime ? parseFloat(savedTime) : 0
+        });
+      }
+    } catch (e) {
+      console.error('Failed to parse persistent state', e);
+    }
+  }, []);
+
 
   useEffect(() => {
     const updateVisitorCount = async () => {
@@ -343,8 +370,14 @@ export default function App() {
     
     if (audioState.isPlaying) {
       audioRef.current.pause();
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = 'paused';
+      }
     } else {
       audioRef.current.play();
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = 'playing';
+      }
     }
     setAudioState(prev => ({ ...prev, isPlaying: !prev.isPlaying }));
   }, [audioState.isPlaying]);
@@ -365,6 +398,16 @@ export default function App() {
     }));
     if (audioRef.current) audioRef.current.loop = false;
     setSelectedSurah(null);
+    setSelectedReciter(null);
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = 'none';
+    }
+    // Clear persist state
+    localStorage.removeItem('persist_audio_surah');
+    localStorage.removeItem('persist_audio_reciter');
+    localStorage.removeItem('persist_audio_is_radio');
+    localStorage.removeItem('persist_audio_time');
+    setResumeState(null);
   }, []);
 
   const toggleRepeat = React.useCallback(() => {
@@ -394,6 +437,13 @@ export default function App() {
         isPlaying: false, 
         isRadio: false 
       }));
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = 'paused';
+      }
+      localStorage.removeItem('persist_audio_surah');
+      localStorage.removeItem('persist_audio_reciter');
+      localStorage.removeItem('persist_audio_is_radio');
+      localStorage.removeItem('persist_audio_time');
       return;
     }
 
@@ -406,8 +456,18 @@ export default function App() {
       currentSurah: null, 
       currentReciter: null 
     }));
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = 'playing';
+    }
     setSelectedSurah(null);
     setSelectedReciter(null);
+
+    // Persist radio state
+    localStorage.setItem('persist_audio_surah', 'null');
+    localStorage.setItem('persist_audio_reciter', 'null');
+    localStorage.setItem('persist_audio_is_radio', 'true');
+    localStorage.setItem('persist_audio_time', '0');
+    setResumeState(null);
   }, [audioState.isRadio]);
 
   const playSurah = React.useCallback((surah: Surah, reciter: Reciter) => {
@@ -431,7 +491,60 @@ export default function App() {
       currentSurah: surah, 
       currentReciter: reciter 
     }));
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = 'playing';
+    }
+
+    // Persist surah state
+    localStorage.setItem('persist_audio_surah', JSON.stringify(surah));
+    localStorage.setItem('persist_audio_reciter', JSON.stringify(reciter));
+    localStorage.setItem('persist_audio_is_radio', 'false');
+    localStorage.setItem('persist_audio_time', '0');
+    setResumeState(null);
   }, [isWakeLockActive, toggleWakeLock]);
+
+  const resumePlayback = React.useCallback(() => {
+    if (!resumeState) return;
+    const { surah, reciter, isRadio, time } = resumeState;
+    if (isRadio) {
+      playRadio();
+    } else if (surah && reciter) {
+      setSelectedReciter(reciter);
+      setSelectedSurah(surah);
+      
+      if (audioRef.current) {
+        const surahId = surah.id.toString().padStart(3, '0');
+        const url = `${reciter.server}${surahId}.mp3`;
+        audioRef.current.src = url;
+        audioRef.current.currentTime = time;
+        audioRef.current.play().then(() => {
+          setAudioState(prev => ({
+            ...prev,
+            isPlaying: true,
+            isRadio: false,
+            currentSurah: surah,
+            currentReciter: reciter,
+            currentTime: time
+          }));
+          if ('mediaSession' in navigator) {
+            navigator.mediaSession.playbackState = 'playing';
+          }
+        }).catch(err => {
+          console.error("Autoplay from saved state blocked by browser", err);
+          setAudioState(prev => ({
+            ...prev,
+            isPlaying: false,
+            isRadio: false,
+            currentSurah: surah,
+            currentReciter: reciter,
+            currentTime: time
+          }));
+        });
+      }
+    }
+    setResumeState(null);
+  }, [resumeState, playRadio]);
+
 
   const playNextSurah = React.useCallback(() => {
     if (!selectedSurah || !selectedReciter || availableSurahs.length === 0) return;
@@ -474,7 +587,13 @@ export default function App() {
     const audio = audioRef.current;
 
     const handleTimeUpdate = () => {
-      setAudioState(prev => ({ ...prev, currentTime: audio.currentTime }));
+      setAudioState(prev => {
+        const next = { ...prev, currentTime: audio.currentTime };
+        if (audio.currentTime > 0) {
+          localStorage.setItem('persist_audio_time', audio.currentTime.toString());
+        }
+        return next;
+      });
     };
 
     const handleLoadedMetadata = () => {
@@ -639,24 +758,112 @@ export default function App() {
                 className="space-y-12"
               >
                 {/* Hero Banner */}
-                <div className="relative h-48 sm:h-64 rounded-[3rem] overflow-hidden group">
-                  <img 
-                    src="https://picsum.photos/seed/quran-banner/1200/400" 
-                    className="w-full h-full object-cover opacity-40 group-hover:scale-105 transition-transform duration-[5s]"
-                    alt="Banner"
-                    referrerPolicy="no-referrer"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
-                  <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6">
-                    <motion.h2 
-                      initial={{ scale: 0.9, opacity: 0 }}
-                      animate={{ scale: 1, opacity: 1 }}
-                      className="text-3xl sm:text-5xl font-black text-gold-primary tracking-tighter mb-2 drop-shadow-2xl"
+                <div className="relative h-48 sm:h-64 rounded-[3rem] overflow-hidden group bg-gradient-to-br from-[#0c0d12] via-[#1a1c24] to-[#08090d] border border-white/5 shadow-2xl flex flex-col items-center justify-center text-center p-6 shadow-gold-primary/5">
+                  {/* Glowing Ambient Spotlights */}
+                  <div className="absolute -top-[20%] -left-[20%] w-[60%] h-[60%] bg-gold-primary/10 blur-[80px] rounded-full group-hover:bg-gold-primary/15 transition-all duration-1000 pointer-events-none" />
+                  <div className="absolute -bottom-[20%] -right-[20%] w-[60%] h-[60%] bg-cyan-primary/10 blur-[80px] rounded-full group-hover:bg-cyan-primary/15 transition-all duration-1000 pointer-events-none" />
+                  
+                  {/* Subtle Elegant Islamic Star Pattern Overlay in CSS */}
+                  <div className="absolute inset-0 opacity-[0.03] bg-[radial-gradient(#d4af37_1px,transparent_1px)] [background-size:24px_24px] pointer-events-none" />
+                  <div className="absolute inset-0 opacity-[0.02] bg-[linear-gradient(45deg,#d4af37_1px,transparent_1px),linear-gradient(-45deg,#d4af37_1px,transparent_1px)] [background-size:48px_48px] pointer-events-none" />
+                  
+                  {/* Golden Border Arc */}
+                  <div className="absolute inset-4 rounded-[2.5rem] border border-gold-primary/5 group-hover:border-gold-primary/10 transition-colors pointer-events-none" />
+
+                  {/* Banner Title */}
+                  <motion.h2 
+                    initial={{ scale: 0.9, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    className="text-3xl sm:text-5xl font-black text-gold-primary tracking-tighter mb-2 drop-shadow-2xl relative z-10"
+                  >
+                    {t.title}
+                  </motion.h2>
+                  <p className="text-sm sm:text-lg text-white/60 font-medium tracking-widest uppercase relative z-10 mb-1">{t.subtitle}</p>
+                </div>
+
+                {/* Quick Utilities: Cairo Radio & Resume Playback */}
+                <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Cairo Radio Quick Play Card */}
+                  <motion.button
+                    whileHover={{ scale: 1.02, y: -2 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={playRadio}
+                    className={`flex items-center justify-between p-4 rounded-3xl border transition-all ${
+                      audioState.isRadio
+                        ? 'bg-cyan-primary/15 border-cyan-primary text-cyan-primary shadow-[0_0_20px_rgba(6,182,212,0.15)]'
+                        : 'bg-white/5 border-white/10 hover:border-gold-primary/50 text-white shadow-xl hover:shadow-gold-primary/5'
+                    }`}
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className={`p-3 rounded-2xl ${
+                        audioState.isRadio 
+                          ? 'bg-cyan-primary text-black animate-pulse' 
+                          : 'bg-gold-primary/10 text-gold-primary'
+                      }`}>
+                        <Radio className="w-5 h-5 sm:w-6 sm:h-6" />
+                      </div>
+                      <div className="text-right">
+                        <p className={`font-black tracking-tight text-sm sm:text-base ${audioState.isRadio ? 'text-cyan-primary' : 'text-gold-primary'}`}>
+                          {t.cairoRadio}
+                        </p>
+                        <p className="text-[10px] sm:text-xs text-white/40 font-bold">{language === 'ar' ? 'البث المباشر المعتمد' : 'Live stream broadcast'}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider ${
+                        audioState.isRadio 
+                          ? 'bg-cyan-primary/20 text-cyan-primary' 
+                          : 'bg-white/5 text-white/50'
+                      }`}>
+                        {audioState.isRadio && audioState.isPlaying ? (language === 'ar' ? 'متصل الآن' : 'Live') : (language === 'ar' ? 'تشغيل من القاهرة' : 'Play Radio')}
+                      </span>
+                    </div>
+                  </motion.button>
+
+                  {/* Resume Listening Card */}
+                  {resumeState ? (
+                    <motion.button
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      whileHover={{ scale: 1.02, y: -2 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={resumePlayback}
+                      className="flex items-center justify-between p-4 rounded-3xl border bg-gold-primary/10 border-gold-primary/40 hover:border-gold-primary text-gold-primary shadow-xl shadow-gold-primary/5 transition-all text-right"
                     >
-                      {t.title}
-                    </motion.h2>
-                    <p className="text-sm sm:text-lg text-white/60 font-medium tracking-widest uppercase">{t.subtitle}</p>
-                  </div>
+                      <div className="flex items-center gap-4">
+                        <div className="p-3 rounded-2xl bg-gold-primary text-black">
+                          <Play className="w-5 h-5 sm:w-6 sm:h-6 fill-current" />
+                        </div>
+                        <div className="text-right">
+                          <p className="font-black tracking-tight text-sm sm:text-base text-gold-primary">
+                            {language === 'ar' ? 'استئناف الاستماع السابق' : 'Resume Playback'}
+                          </p>
+                          <p className="text-[10px] sm:text-xs text-white/65 font-bold truncate max-w-[180px] sm:max-w-xs">
+                            {resumeState.isRadio 
+                              ? (language === 'ar' ? 'إذاعة القاهرة' : 'Cairo Radio')
+                              : `${resumeState.reciter ? resumeState.reciter.name : ''} • ${resumeState.surah ? (language === 'ar' ? 'سورة ' + resumeState.surah.name : resumeState.surah.englishName) : ''}`}
+                          </p>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-black px-2.5 py-1 rounded-full bg-gold-primary/25 text-gold-primary uppercase tracking-wider">
+                        {formatTime(resumeState.time)}
+                      </span>
+                    </motion.button>
+                  ) : (
+                    <div className="flex items-center justify-between p-4 rounded-3xl border border-white/5 bg-white/[0.01] text-white/20 select-none">
+                      <div className="flex items-center gap-4">
+                        <div className="p-3 rounded-2xl bg-white/5 text-white/10">
+                          <BookOpen className="w-5 h-5 sm:w-6 sm:h-6" />
+                        </div>
+                        <div className="text-right">
+                          <p className="font-bold text-sm tracking-tight">
+                            {language === 'ar' ? 'محفوظات الاستماع' : 'Audio History'}
+                          </p>
+                          <p className="text-[10px] font-bold">{language === 'ar' ? 'لا يوجد استماع معلق' : 'No suspended session'}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Search Section */}
