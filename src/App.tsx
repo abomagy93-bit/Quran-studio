@@ -196,6 +196,18 @@ export default function App() {
     }
   }, []);
 
+  // Reset scroll position to top when entering or leaving a reciter page / mushaf view
+  useEffect(() => {
+    // Instant scroll to the top of the window
+    window.scrollTo({ top: 0, behavior: 'auto' });
+    
+    // Reset internal scrolling containers to top as well
+    const scrollContainers = document.querySelectorAll('.overflow-y-auto');
+    scrollContainers.forEach(container => {
+      container.scrollTop = 0;
+    });
+  }, [selectedReciter]);
+
 
   useEffect(() => {
     const updateVisitorCount = async () => {
