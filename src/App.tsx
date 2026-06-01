@@ -150,6 +150,24 @@ export default function App() {
 
   const [isPlayerMinimized, setIsPlayerMinimized] = useState(false);
   const [visitorCount, setVisitorCount] = useState(0);
+  const [showFacebookOverlay, setShowFacebookOverlay] = useState(false);
+  const [isUrlCopied, setIsUrlCopied] = useState(false);
+
+  useEffect(() => {
+    const ua = navigator.userAgent || navigator.vendor || (window as any).opera || '';
+    const isFacebook = ua.indexOf("FBAN") > -1 || ua.indexOf("FBIOS") > -1 || ua.indexOf("Messenger") > -1;
+    const isAndroid = /android/i.test(ua);
+
+    if (isFacebook) {
+      if (isAndroid) {
+        const cleanUrl = window.location.href.replace(/^https?:\/\//, '');
+        window.location.href = `intent://${cleanUrl}#Intent;scheme=https;package=com.android.chrome;end`;
+      } else {
+        setShowFacebookOverlay(true);
+      }
+    }
+  }, []);
+
   const [resumeState, setResumeState] = useState<{
     surah: Surah | null;
     reciter: Reciter | null;
@@ -643,6 +661,13 @@ export default function App() {
       setTimeout(() => setIsCopied(false), 2000);
     });
   }, [selectedSurah, selectedReciter]);
+
+  const copyWebsiteUrl = React.useCallback(() => {
+    navigator.clipboard.writeText(window.location.href).then(() => {
+      setIsUrlCopied(true);
+      setTimeout(() => setIsUrlCopied(false), 2000);
+    });
+  }, []);
 
   // Handle Audio
   useEffect(() => {
@@ -1231,6 +1256,93 @@ export default function App() {
               </motion.footer>
             )}
           </>
+        )}
+      </AnimatePresence>
+
+      {/* Facebook In-App Browser Escape Overlay */}
+      <AnimatePresence>
+        {showFacebookOverlay && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/95 backdrop-blur-2xl text-white select-none"
+            dir="rtl"
+          >
+            {/* Ambient Background Glows */}
+            <div className="absolute top-[20%] left-[20%] w-[50%] h-[50%] bg-gold-primary/10 blur-[100px] rounded-full pointer-events-none" />
+            <div className="absolute bottom-[20%] right-[20%] w-[50%] h-[50%] bg-cyan-primary/10 blur-[100px] rounded-full pointer-events-none" />
+            
+            <motion.div
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
+              className="relative max-w-md w-full bg-gradient-to-b from-[#16171d] to-[#0c0d12] border border-white/10 rounded-[2.5rem] p-6 sm:p-8 text-center shadow-2xl overflow-hidden"
+            >
+              {/* Star pattern */}
+              <div className="absolute inset-0 opacity-[0.03] bg-[radial-gradient(#d4af37_1px,transparent_1px)] [background-size:16px_16px] pointer-events-none" />
+
+              {/* Glowing Icon */}
+              <div className="relative mx-auto w-16 h-16 rounded-2xl bg-gold-primary/10 flex items-center justify-center text-gold-primary mb-6 border border-gold-primary/25 shadow-[0_0_20px_rgba(212,175,55,0.15)] animate-pulse">
+                <Globe className="w-8 h-8" />
+              </div>
+
+              {/* Title */}
+              <h3 className="text-xl sm:text-2xl font-black text-gold-primary tracking-tight mb-3">
+                اسرع تصفح وسماع بدون انقطاع!
+              </h3>
+              
+              <p className="text-sm sm:text-base text-white/70 font-medium leading-relaxed mb-6">
+                أنت تستخدم متصفح فيسبوك الداخلي، لتجربة تشغيل فائقة السرعة ولتجنب توقف التلاوة عند إغلاق الشاشة، يرجى تشغيل الموقع في التطبيق الافتراضي لهاتفك (سافاري أو كروم).
+              </p>
+
+              {/* Steps */}
+              <div className="space-y-4 text-right mb-8">
+                <div className="flex gap-4 items-start p-3 bg-white/5 rounded-2xl border border-white/5">
+                  <span className="flex items-center justify-center w-6 h-6 rounded-lg bg-gold-primary text-black font-black text-xs shrink-0">١</span>
+                  <p className="text-xs sm:text-sm text-white/80 font-bold leading-normal">
+                    انقر على زر القائمة <span className="text-gold-primary font-black">•••</span> (النقاط الثلاث) في الزاوية العليا أو السفلى للشاشة.
+                  </p>
+                </div>
+                <div className="flex gap-4 items-start p-3 bg-white/5 rounded-2xl border border-white/5">
+                  <span className="flex items-center justify-center w-6 h-6 rounded-lg bg-gold-primary text-black font-black text-xs shrink-0">٢</span>
+                  <p className="text-xs sm:text-sm text-white/80 font-bold leading-normal">
+                    اختر <span className="text-gold-primary font-black">"فتح في المتصفح الخارجي"</span> أو <span className="text-gold-primary font-black">"Open in Safari"</span>.
+                  </p>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex flex-col gap-3">
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={copyWebsiteUrl}
+                  className={`flex items-center justify-center gap-3 py-4 px-6 rounded-2xl font-black transition-all text-sm ${
+                    isUrlCopied 
+                      ? 'bg-cyan-primary/20 text-cyan-primary border border-cyan-primary animate-pulse' 
+                      : 'bg-gold-primary text-black hover:bg-gold-primary/95 border border-gold-primary/20 shadow-lg shadow-gold-primary/10'
+                  }`}
+                >
+                  {isUrlCopied ? <Check className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
+                  {isUrlCopied ? 'تم نسخ الرابط المباشر' : 'نسخ رابط الموقع ومتابعته يدوياً'}
+                </motion.button>
+
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => setShowFacebookOverlay(false)}
+                  className="py-3 px-6 rounded-2xl font-bold text-white/40 hover:text-white/80 transition-all text-xs border border-white/5 hover:bg-white/5"
+                >
+                  المتابعة على فيسبوك مؤقتاً
+                </motion.button>
+              </div>
+
+              <div className="mt-6 pt-4 border-t border-white/5 text-[10px] text-white/30 font-black">
+                صدقة جارية لأمي وجميع موتى المسلمين
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
 
