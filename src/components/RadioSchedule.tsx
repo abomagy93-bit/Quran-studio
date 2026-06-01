@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Clock, Radio, Sun, Moon, Coffee, Sparkles, BookOpen, ChevronDown, ChevronUp, ExternalLink } from 'lucide-react';
+import { Clock, Radio, Sun, Moon, Coffee, Sparkles, BookOpen, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
 import { Language } from '../types';
 
 interface ProgramSlot {
@@ -372,6 +372,8 @@ const PROGRAM_SLOTS: ProgramSlot[] = [
 ];
 
 export function RadioSchedule({ language }: { language: Language }) {
+  const [timeOffset, setTimeOffset] = useState<number>(0);
+  const [isSynced, setIsSynced] = useState<boolean>(false);
   const [cairoTime, setCairoTime] = useState({ 
     hours: 0, 
     minutes: 0, 
@@ -381,11 +383,63 @@ export function RadioSchedule({ language }: { language: Language }) {
   });
   const [showAllPrograms, setShowAllPrograms] = useState(false);
 
-  // Calculate current Cairo time dynamically
+  // Synchronize with authentic Cairo atomic time on mount
+  useEffect(() => {
+    let active = true;
+    const fetchTrueTime = async () => {
+      try {
+        const response = await fetch('https://worldtimeapi.org/api/timezone/Africa/Cairo');
+        if (!response.ok) throw new Error('Primary source down');
+        const data = await response.json();
+        if (data && typeof data.unixtime === 'number') {
+          const trueMs = data.unixtime * 1000;
+          const localMs = Date.now();
+          const offset = trueMs - localMs;
+          if (active) {
+            setTimeOffset(offset);
+            setIsSynced(true);
+            console.log(`Cairo Accurate Sync completed (offset: ${offset}ms)`);
+          }
+        }
+      } catch (err) {
+        if (!active) return;
+        console.warn('Primary sync source down, trying backup time server...', err);
+        try {
+          const response = await fetch('https://timeapi.io/api/time/current/zone?timeZone=Africa/Cairo');
+          if (response.ok) {
+            const data = await response.json();
+            if (data && data.dateTime) {
+              const trueMs = new Date(data.dateTime).getTime();
+              const localMs = Date.now();
+              const offset = trueMs - localMs;
+              if (active) {
+                setTimeOffset(offset);
+                setIsSynced(true);
+                console.log(`Cairo Backup Sync completed (offset: ${offset}ms)`);
+              }
+            }
+          }
+        } catch (backupErr) {
+          console.warn('All sync time servers are unavailable. Gracefully fallback to internal calendar clock.', backupErr);
+        }
+      }
+    };
+
+    fetchTrueTime();
+    const interval = setInterval(fetchTrueTime, 180000); // Re-sync every 3 minutes
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Calculate current Cairo time dynamically using the high-accuracy offset
   useEffect(() => {
     const updateTime = () => {
       try {
-        const d = new Date();
+        // Apply the safe network time offset to ensure device clock misalignment has zero effect
+        const d = new Date(Date.now() + timeOffset);
+        
         // Format to Africa/Cairo Time
         const options: Intl.DateTimeFormatOptions = {
           timeZone: 'Africa/Cairo',
@@ -403,6 +457,9 @@ export function RadioSchedule({ language }: { language: Language }) {
           if (p.type === 'minute') mm = parseInt(p.value);
           if (p.type === 'second') ss = parseInt(p.value);
         });
+
+        // Safe-guard hour string formatted quirks (handling "24" formatted midnight boundary)
+        if (hh === 24) hh = 0;
 
         // Human readable time label (including seconds to show alive state)
         const displayOptions: Intl.DateTimeFormatOptions = {
@@ -435,7 +492,7 @@ export function RadioSchedule({ language }: { language: Language }) {
     updateTime();
     const interval = setInterval(updateTime, 1000);
     return () => clearInterval(interval);
-  }, [language]);
+  }, [language, timeOffset]);
 
   // Check if a program slot is currently broadcasting
   const isSlotActive = (slot: ProgramSlot, currentHours: number, currentMinutes: number) => {
@@ -449,6 +506,44 @@ export function RadioSchedule({ language }: { language: Language }) {
     } else {
       // Overnight
       return currentTotal >= startTotal || currentTotal < endTotal;
+    }
+  };
+
+  // Check if a program slot is already finished for today
+  const isSlotFinished = (slot: ProgramSlot, currentHours: number, currentMinutes: number) => {
+    // If it is active, it is NOT finished
+    if (isSlotActive(slot, currentHours, currentMinutes)) {
+      return false;
+    }
+    
+    const currentTotal = currentHours * 60 + currentMinutes;
+    const startTotal = slot.startHour * 60 + slot.startMinute;
+    let endTotal = slot.endHour * 60 + slot.endMinute;
+
+    if (startTotal <= endTotal) {
+      return currentTotal >= endTotal;
+    } else {
+      return currentTotal >= endTotal && currentTotal < startTotal;
+    }
+  };
+
+  // Filter program slots that have finished to only show remaining/upcoming programs
+  const upcomingSlots = useMemo(() => {
+    return PROGRAM_SLOTS.filter(slot => !isSlotFinished(slot, cairoTime.hours, cairoTime.minutes));
+  }, [cairoTime.hours, cairoTime.minutes]);
+
+  // Custom slider horizontal controller supporting RTL
+  const scrollSlider = (direction: 'left' | 'right') => {
+    const slider = document.getElementById('programs-slider');
+    if (slider) {
+      const isRTL = language === 'ar';
+      let amount = 300;
+      if (direction === 'left') {
+        amount = isRTL ? 300 : -300;
+      } else {
+        amount = isRTL ? -300 : 300;
+      }
+      slider.scrollBy({ left: amount, behavior: 'smooth' });
     }
   };
 
@@ -546,12 +641,19 @@ export function RadioSchedule({ language }: { language: Language }) {
 
           {/* Clock Ticker widget */}
           <div className="flex items-center gap-3 bg-white/5 border border-white/10 px-4 py-2.5 rounded-2xl shrink-0">
-            <div className="w-8 h-8 rounded-xl bg-cyan-primary/10 flex items-center justify-center text-cyan-primary shrink-0">
-              <Clock className="w-4 h-4 animate-pulse" />
+            <div className="w-8 h-8 rounded-xl bg-cyan-primary/10 flex items-center justify-center text-cyan-primary shrink-0 animate-pulse">
+              <Clock className="w-4 h-4 text-cyan-primary" />
             </div>
             <div className="text-right">
-              <div className="text-[10px] text-white/40 font-bold leading-none">
-                {language === 'ar' ? 'توقيت وتاريخ القاهرة (تلقائي مستمر)' : 'Cairo Live Time & Date (Auto-Synced)'}
+              <div className="flex items-center gap-1.5 justify-start">
+                <span className={`text-[10px] text-white/40 font-bold leading-none`}>
+                  {language === 'ar' ? 'توقيت وتاريخ القاهرة الآن' : 'Cairo Live Time & Date'}
+                </span>
+                {isSynced && (
+                  <span className="inline-flex items-center gap-0.5 text-[8px] font-black bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.5 rounded uppercase tracking-wider scale-90 select-none animate-pulse">
+                    ● {language === 'ar' ? 'دقة متناهية (متزامن)' : 'Atomic Sync'}
+                  </span>
+                )}
               </div>
               <div className="text-xs sm:text-sm font-black text-cyan-primary mt-1 leading-none">
                 {cairoTime.formatted || '...'}
@@ -627,45 +729,87 @@ export function RadioSchedule({ language }: { language: Language }) {
               transition={{ duration: 0.3 }}
               className="overflow-hidden mb-6"
             >
-              <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1 custom-scrollbar">
-                {PROGRAM_SLOTS.map((slot) => {
-                  const isActive = isSlotActive(slot, cairoTime.hours, cairoTime.minutes);
-                  return (
-                    <div
-                      key={slot.id}
-                      className={`p-4 rounded-2xl border transition-all ${
-                        isActive
-                          ? 'bg-cyan-primary/5 border-cyan-primary/40 text-white shadow-md'
-                          : 'bg-white/[0.01] border-white/5 text-white/70 hover:bg-white/[0.03] hover:border-white/10'
-                      }`}
-                    >
-                      <div className="flex items-start sm:items-center justify-between gap-4">
-                        <div className="flex items-center gap-3 text-right">
-                          <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${isActive ? 'bg-cyan-primary/10 text-cyan-primary border border-cyan-primary/20' : 'bg-white/5 text-white/30'}`}>
-                            {renderIcon(slot.iconType)}
+              <div className="relative group/nav mt-2">
+                {/* Scroll track navigation buttons */}
+                <button
+                  type="button"
+                  onClick={() => scrollSlider('left')}
+                  className="absolute -left-3 top-1/2 -translate-y-1/2 z-10 w-9 h-9 rounded-full bg-black/85 backdrop-blur-md border border-white/10 hover:border-cyan-primary/50 text-white flex items-center justify-center cursor-pointer transition-all hover:scale-105 active:scale-95 shadow-[0_0_10px_rgba(0,0,0,0.5)]"
+                >
+                  <ChevronLeft className="w-5 h-5 text-cyan-primary" />
+                </button>
+
+                {/* Horizontal slide container */}
+                <div
+                  id="programs-slider"
+                  className="flex gap-4 overflow-x-auto pb-4 pt-2 snap-x snap-mandatory scroll-smooth custom-scrollbar no-scrollbar scrollbar-none"
+                  style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+                >
+                  {upcomingSlots.length === 0 ? (
+                    <div className="w-full text-center py-8 text-white/40 text-xs font-bold bg-white/[0.01] rounded-2xl border border-white/5">
+                      {language === 'ar' ? 'اكتملت جميع مواعيد اليوم وستتجدد الخريطة بالكامل قريباً' : 'All schedule slots completed for today. Auto-reloads shortly.'}
+                    </div>
+                  ) : (
+                    upcomingSlots.map((slot) => {
+                      const isActive = isSlotActive(slot, cairoTime.hours, cairoTime.minutes);
+                      return (
+                        <div
+                          key={slot.id}
+                          className={`w-[290px] sm:w-[330px] shrink-0 p-4 rounded-2xl border transition-all snap-start flex flex-col justify-between h-[155px] select-none relative overflow-hidden ${
+                            isActive
+                              ? 'bg-gradient-to-br from-cyan-primary/[0.08] to-gold-primary/[0.04] border-cyan-primary/40 shadow-lg shadow-cyan-primary/10'
+                              : 'bg-white/[0.02] border-white/5 text-white/70 hover:bg-white/[0.04] hover:border-white/15'
+                          }`}
+                        >
+                          {/* Shimmer light effect inside active card */}
+                          {isActive && (
+                            <div className="absolute top-0 right-0 w-24 h-24 bg-cyan-primary/10 blur-2xl rounded-full pointer-events-none" />
+                          )}
+                          
+                          <div className="flex items-start justify-between gap-3 text-right">
+                            <div className="flex items-start gap-2.5 min-w-0">
+                              <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${isActive ? 'bg-cyan-primary/10 text-cyan-primary border border-cyan-primary/20' : 'bg-white/5 text-white/30'}`}>
+                                {renderIcon(slot.iconType)}
+                              </div>
+                              <div className="min-w-0">
+                                <span className="inline-flex text-[10px] font-black text-cyan-primary bg-cyan-primary/5 px-2 py-0.5 rounded border border-cyan-primary/10">
+                                  {getFormatTimeStr(slot.startHour, slot.startMinute)} - {getFormatTimeStr(slot.endHour, slot.endMinute)}
+                                </span>
+                                <h6 className={`text-xs sm:text-sm font-black mt-1.5 leading-snug line-clamp-1 ${isActive ? 'text-gold-primary' : 'text-white/90'}`}>
+                                  {language === 'ar' ? slot.nameAr : slot.nameEn}
+                                </h6>
+                                <p className="text-[10px] text-white/60 mt-1 leading-relaxed line-clamp-2">
+                                  {language === 'ar' ? slot.descriptionAr : slot.descriptionEn}
+                                </p>
+                              </div>
+                            </div>
                           </div>
-                          <div>
-                            <span className="text-[10px] font-bold text-white/30">
-                              {getFormatTimeStr(slot.startHour, slot.startMinute)} - {getFormatTimeStr(slot.endHour, slot.endMinute)}
+
+                          <div className="flex items-center justify-between border-t border-white/5 pt-2 mt-2 gap-2 text-right">
+                            <span className="text-[9px] font-bold text-white/40 truncate">
+                              {language === 'ar' ? 'تقديم: ' : 'Hosted by: '}{language === 'ar' ? slot.presenterAr : slot.presenterEn}
                             </span>
-                            <h6 className={`text-xs sm:text-sm font-bold mt-0.5 leading-snug ${isActive ? 'text-gold-primary' : 'text-white/80'}`}>
-                              {language === 'ar' ? slot.nameAr : slot.nameEn}
-                            </h6>
-                            <p className="text-[10px] text-white/40 mt-0.5 leading-normal">
-                              {language === 'ar' ? slot.presenterAr : slot.presenterEn}
-                            </p>
+                            
+                            {isActive && (
+                              <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-cyan-primary/20 text-cyan-primary border border-cyan-primary/30 shrink-0 uppercase tracking-widest animate-pulse">
+                                {language === 'ar' ? 'الآن' : 'Now'}
+                              </span>
+                            )}
                           </div>
                         </div>
+                      );
+                    })
+                  )}
+                </div>
 
-                        {isActive && (
-                          <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-cyan-primary/20 text-cyan-primary border border-cyan-primary/30 shrink-0 uppercase tracking-widest animate-pulse">
-                            {language === 'ar' ? 'الآن' : 'Now'}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+                {/* Right Arrow navigation button */}
+                <button
+                  type="button"
+                  onClick={() => scrollSlider('right')}
+                  className="absolute -right-3 top-1/2 -translate-y-1/2 z-10 w-9 h-9 rounded-full bg-black/85 backdrop-blur-md border border-white/10 hover:border-cyan-primary/50 text-white flex items-center justify-center cursor-pointer transition-all hover:scale-105 active:scale-95 shadow-[0_0_10px_rgba(0,0,0,0.5)]"
+                >
+                  <ChevronRight className="w-5 h-5 text-cyan-primary" />
+                </button>
               </div>
             </motion.div>
           )}
@@ -681,8 +825,8 @@ export function RadioSchedule({ language }: { language: Language }) {
           >
             {showAllPrograms ? <ChevronUp className="w-4 h-4 text-gold-primary" /> : <ChevronDown className="w-4 h-4 text-gold-primary" />}
             {showAllPrograms 
-              ? (language === 'ar' ? 'طي جدول البرامج اليومي' : 'Hide Daily Programs list') 
-              : (language === 'ar' ? 'عرض خريطة البرامج والفقرات بالكامل' : 'View Full Schedule & Programs List')}
+              ? (language === 'ar' ? 'طي قائمة البرامج المتبقية' : 'Hide Remaining Programs list') 
+              : (language === 'ar' ? `عرض الفقرات المتبقية اليوم (${upcomingSlots.length})` : `Show remaining programs today (${upcomingSlots.length})`)}
           </motion.button>
 
           <a
