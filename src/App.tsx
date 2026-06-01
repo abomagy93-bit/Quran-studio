@@ -33,7 +33,8 @@ import {
   Gauge,
   Copy,
   Check,
-  AlertCircle
+  AlertCircle,
+  Zap
 } from 'lucide-react';
 import { Reciter, Surah, AudioState, Language } from './types';
 import { SURAHS, EXTERNAL_LINKS, TRANSLATIONS } from './constants';
@@ -115,7 +116,7 @@ export default function App() {
   const [reciters, setReciters] = useState<Reciter[]>(() => {
     try {
       const savedLang = localStorage.getItem('language') || 'ar';
-      const cacheKey = `reciters_${savedLang}_v4`;
+      const cacheKey = `reciters_${savedLang}_v5`;
       const cachedData = localStorage.getItem(cacheKey);
       const cacheTime = localStorage.getItem(`${cacheKey}_time`);
       if (cachedData && cacheTime && Date.now() - parseInt(cacheTime) < 86400000) {
@@ -141,7 +142,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(() => {
     try {
       const savedLang = localStorage.getItem('language') || 'ar';
-      const cacheKey = `reciters_${savedLang}_v4`;
+      const cacheKey = `reciters_${savedLang}_v5`;
       const cachedData = localStorage.getItem(cacheKey);
       const cacheTime = localStorage.getItem(`${cacheKey}_time`);
       return !(cachedData && cacheTime && Date.now() - parseInt(cacheTime) < 86400000);
@@ -266,6 +267,70 @@ export default function App() {
   const [isMuted, setIsMuted] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
 
+  // Web Audio API hook variables for optional 2x Volume Boost
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const gainNodeRef = useRef<GainNode | null>(null);
+  const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const [isVolumeBoosted, setIsVolumeBoosted] = useState(false);
+
+  const initWebAudio = React.useCallback(() => {
+    if (!audioRef.current) return;
+    if (audioContextRef.current) return; // Already initialized
+
+    try {
+      // Configure crossOrigin immediately to allow routing audio nodes through gain filters
+      audioRef.current.crossOrigin = 'anonymous';
+
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      const ctx = new AudioContextClass();
+      audioContextRef.current = ctx;
+
+      const gainNode = ctx.createGain();
+      gainNode.gain.value = isVolumeBoosted ? 2.0 : 1.0;
+      gainNodeRef.current = gainNode;
+
+      if (!sourceNodeRef.current) {
+        sourceNodeRef.current = ctx.createMediaElementSource(audioRef.current);
+      }
+      
+      sourceNodeRef.current.connect(gainNode);
+      gainNode.connect(ctx.destination);
+    } catch (e) {
+      console.error('Failed to initialize Web Audio API volume boost node:', e);
+    }
+  }, [isVolumeBoosted]);
+
+  const toggleVolumeBoost = React.useCallback(() => {
+    const nextBoost = !isVolumeBoosted;
+    setIsVolumeBoosted(nextBoost);
+    
+    if (nextBoost) {
+      if (!audioContextRef.current) {
+        initWebAudio();
+      } else {
+        if (audioContextRef.current.state === 'suspended') {
+          audioContextRef.current.resume();
+        }
+        if (gainNodeRef.current) {
+          gainNodeRef.current.gain.setValueAtTime(2.0, audioContextRef.current.currentTime);
+        }
+      }
+    } else {
+      if (gainNodeRef.current) {
+        const currentTime = audioContextRef.current ? audioContextRef.current.currentTime : 0;
+        gainNodeRef.current.gain.setValueAtTime(1.0, currentTime);
+      }
+    }
+  }, [isVolumeBoosted, initWebAudio]);
+
+  // Sync volume boost gain node when toggled
+  useEffect(() => {
+    if (gainNodeRef.current) {
+      const currentTime = audioContextRef.current ? audioContextRef.current.currentTime : 0;
+      gainNodeRef.current.gain.setValueAtTime(isVolumeBoosted ? 2.0 : 1.0, currentTime);
+    }
+  }, [isVolumeBoosted]);
+
   // Wake Lock Logic
   const toggleWakeLock = React.useCallback(async () => {
     if ('wakeLock' in navigator) {
@@ -295,7 +360,7 @@ export default function App() {
   // Fetch reciters
   useEffect(() => {
     const fetchReciters = async () => {
-      const cacheKey = `reciters_${language}_v4`;
+      const cacheKey = `reciters_${language}_v5`;
       const cachedData = localStorage.getItem(cacheKey);
       const cacheTime = localStorage.getItem(`${cacheKey}_time`);
       
@@ -317,13 +382,9 @@ export default function App() {
           'محمد صديق المنشاوي',
           'عبدالباسط عبدالصمد',
           'محمود خليل الحصري',
-          'كامل يوسف البهتيمي',
-          'راغب مصطفى غلوش',
-          'أحمد الصاروطي',
           'محمود علي البنا',
           'مصطفى إسماعيل',
           'محمد رفعت',
-          'رشاد درويش',
           'محمد محمود الطبلاوي',
           'أحمد نعينع',
           'مشاري العفاسي',
@@ -339,13 +400,8 @@ export default function App() {
           arData.reciters.find((r: any) => r.name.includes(name))?.id
         ).filter(id => id !== undefined);
 
-        // elegance classical grouping layout: insert virtual IDs after Al-Husary (115)
-        const husaryIdx = priorityIds.indexOf(115);
-        if (husaryIdx !== -1) {
-          priorityIds.splice(husaryIdx + 1, 0, 90001, 90002, 90003, 90004);
-        } else {
-          priorityIds.push(90001, 90002, 90003, 90004);
-        }
+        // Prepend Sheikh Rashad Darwish virtual ID (90004) to the absolute top of the list!
+        priorityIds.unshift(90004);
 
         // Explicitly add requested key reciters to top priority
         [54, 44, 115, 120, 117].forEach(id => {
@@ -460,27 +516,6 @@ export default function App() {
 
         // Inject Custom Classical Egyptian Reciters manually after api results
         allReciters.push({
-          id: 90001,
-          name: language === 'ar' ? 'الشيخ كامل يوسف البهتيمي (مجود)' : 'Sheikh Kamel Yusuf Al-Bahtimi (Mujawwad)',
-          server: 'https://archive.org/download/kamel-yousef-al-bahtimi/',
-          surahs: Array.from({length: 114}, (_, i) => i + 1).join(','),
-          letter: 'ك'
-        });
-        allReciters.push({
-          id: 90002,
-          name: language === 'ar' ? 'الشيخ راغب مصطفى غلوش (مجود)' : 'Sheikh Ragheb Mustafa Ghalwash (Mujawwad)',
-          server: 'https://archive.org/download/raghib-mustafa-ghalwash/',
-          surahs: Array.from({length: 114}, (_, i) => i + 1).join(','),
-          letter: 'ر'
-        });
-        allReciters.push({
-          id: 90003,
-          name: language === 'ar' ? 'الشيخ أحمد الصاروطي (مرتل)' : 'Sheikh Ahmad Al-Sarouti (Murattal)',
-          server: 'https://archive.org/download/ahmad-al-saroti/',
-          surahs: Array.from({length: 114}, (_, i) => i + 1).join(','),
-          letter: 'أ'
-        });
-        allReciters.push({
           id: 90004,
           name: language === 'ar' ? 'الشيخ رشاد درويش (مرتل)' : 'Sheikh Rashad Darwish (Murattal)',
           server: 'https://archive.org/download/rashad-darwish/',
@@ -545,13 +580,20 @@ export default function App() {
         navigator.mediaSession.playbackState = 'paused';
       }
     } else {
+      if (isVolumeBoosted) {
+        if (!audioContextRef.current) {
+          initWebAudio();
+        } else if (audioContextRef.current.state === 'suspended') {
+          audioContextRef.current.resume();
+        }
+      }
       audioRef.current.play();
       if ('mediaSession' in navigator) {
         navigator.mediaSession.playbackState = 'playing';
       }
     }
     setAudioState(prev => ({ ...prev, isPlaying: !prev.isPlaying }));
-  }, [audioState.isPlaying]);
+  }, [audioState.isPlaying, isVolumeBoosted, initWebAudio]);
 
   const stopPlayback = React.useCallback(() => {
     if (!audioRef.current) return;
@@ -618,6 +660,14 @@ export default function App() {
       return;
     }
 
+    if (isVolumeBoosted) {
+      if (!audioContextRef.current) {
+        initWebAudio();
+      } else if (audioContextRef.current.state === 'suspended') {
+        audioContextRef.current.resume();
+      }
+    }
+
     audioRef.current.src = EXTERNAL_LINKS.QURAN_RADIO;
     audioRef.current.play();
     setAudioState(prev => ({ 
@@ -639,11 +689,19 @@ export default function App() {
     localStorage.setItem('persist_audio_is_radio', 'true');
     localStorage.setItem('persist_audio_time', '0');
     setResumeState(null);
-  }, [audioState.isRadio]);
+  }, [audioState.isRadio, isVolumeBoosted, initWebAudio]);
 
   const playSurah = React.useCallback((surah: Surah, reciter: Reciter) => {
     if (!audioRef.current) return;
     
+    if (isVolumeBoosted) {
+      if (!audioContextRef.current) {
+        initWebAudio();
+      } else if (audioContextRef.current.state === 'suspended') {
+        audioContextRef.current.resume();
+      }
+    }
+
     const surahId = surah.id.toString().padStart(3, '0');
     const url = `${reciter.server}${surahId}.mp3`;
     
@@ -672,7 +730,7 @@ export default function App() {
     localStorage.setItem('persist_audio_is_radio', 'false');
     localStorage.setItem('persist_audio_time', '0');
     setResumeState(null);
-  }, [isWakeLockActive, toggleWakeLock]);
+  }, [isWakeLockActive, toggleWakeLock, isVolumeBoosted, initWebAudio]);
 
   const resumePlayback = React.useCallback(() => {
     if (!resumeState) return;
@@ -684,6 +742,14 @@ export default function App() {
       setSelectedSurah(surah);
       
       if (audioRef.current) {
+        if (isVolumeBoosted) {
+          if (!audioContextRef.current) {
+            initWebAudio();
+          } else if (audioContextRef.current.state === 'suspended') {
+            audioContextRef.current.resume();
+          }
+        }
+
         const surahId = surah.id.toString().padStart(3, '0');
         const url = `${reciter.server}${surahId}.mp3`;
         audioRef.current.src = url;
@@ -714,7 +780,7 @@ export default function App() {
       }
     }
     setResumeState(null);
-  }, [resumeState, playRadio]);
+  }, [resumeState, playRadio, isVolumeBoosted, initWebAudio]);
 
 
   const playNextSurah = React.useCallback(() => {
@@ -757,6 +823,7 @@ export default function App() {
   useEffect(() => {
     if (!audioRef.current) {
       audioRef.current = new Audio();
+      audioRef.current.crossOrigin = 'anonymous';
       audioRef.current.volume = audioState.volume;
       audioRef.current.playbackRate = audioState.playbackRate;
       audioRef.current.preload = 'auto';
@@ -788,7 +855,7 @@ export default function App() {
     };
 
     const handleError = () => {
-      if (selectedSurah && selectedReciter && (selectedReciter.id >= 90000 || selectedReciter.name.includes("البهتيمي") || selectedReciter.name.includes("الصاروطي") || selectedReciter.name.includes("غلوش"))) {
+      if (selectedSurah && selectedReciter && selectedReciter.id >= 90000) {
         setPlaybackError(language === 'ar' 
           ? "تنبيه: عذراً، التسجيل الكامل والواضح لهذه السورة من نوادر التلاوات غير متاح حالياً لهذه المدرسة." 
           : "Notice: Apologies, the full studio recording of this Surah is currently unavailable for this classical reciter."
@@ -1339,6 +1406,14 @@ export default function App() {
                         >
                           <Gauge className="w-5 h-5" />
                           <span className="text-[10px] font-black w-6">{audioState.playbackRate}x</span>
+                        </button>
+                        <button 
+                          onClick={toggleVolumeBoost}
+                          className={`flex items-center gap-0.5 transition-all ${isVolumeBoosted ? 'text-gold-primary filter drop-shadow-[0_0_8px_rgba(255,215,0,0.6)] scale-110 font-bold' : 'text-white/40 hover:text-white'}`}
+                          title={language === 'ar' ? 'مضاعفة حجم الصوت (200%)' : 'Volume Boost (200%)'}
+                        >
+                          <Zap className={`w-5 h-5 ${isVolumeBoosted ? 'fill-gold-primary' : ''}`} />
+                          <span className="text-[10px] font-black w-8">{isVolumeBoosted ? '200%' : '100%'}</span>
                         </button>
                       </div>
                       
