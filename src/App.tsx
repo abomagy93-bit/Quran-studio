@@ -116,7 +116,7 @@ export default function App() {
   const [reciters, setReciters] = useState<Reciter[]>(() => {
     try {
       const savedLang = localStorage.getItem('language') || 'ar';
-      const cacheKey = `reciters_${savedLang}_v5`;
+      const cacheKey = `reciters_${savedLang}_v6`;
       const cachedData = localStorage.getItem(cacheKey);
       const cacheTime = localStorage.getItem(`${cacheKey}_time`);
       if (cachedData && cacheTime && Date.now() - parseInt(cacheTime) < 86400000) {
@@ -142,7 +142,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(() => {
     try {
       const savedLang = localStorage.getItem('language') || 'ar';
-      const cacheKey = `reciters_${savedLang}_v5`;
+      const cacheKey = `reciters_${savedLang}_v6`;
       const cachedData = localStorage.getItem(cacheKey);
       const cacheTime = localStorage.getItem(`${cacheKey}_time`);
       return !(cachedData && cacheTime && Date.now() - parseInt(cacheTime) < 86400000);
@@ -360,7 +360,7 @@ export default function App() {
   // Fetch reciters
   useEffect(() => {
     const fetchReciters = async () => {
-      const cacheKey = `reciters_${language}_v5`;
+      const cacheKey = `reciters_${language}_v6`;
       const cachedData = localStorage.getItem(cacheKey);
       const cacheTime = localStorage.getItem(`${cacheKey}_time`);
       
@@ -378,26 +378,71 @@ export default function App() {
         const arData = await arResponse.json();
         
         const priorityArabicNames = [
-          'علي الحذيفي',
           'محمد صديق المنشاوي',
           'عبدالباسط عبدالصمد',
           'محمود خليل الحصري',
           'محمود علي البنا',
           'مصطفى إسماعيل',
           'محمد رفعت',
+          'ناصر القطامي',
+          'أحمد بن طالب حميد',
+          'محمد اللحيدان',
+          'علي الحذيفي',
           'محمد محمود الطبلاوي',
+          'محمد جبريل',
+          'محمد أيوب',
+          'عبدالله الموسى',
           'أحمد نعينع',
           'مشاري العفاسي',
           'أحمد العجمي',
           'توفيق الصايغ',
           'توفيق الطائف',
-          'أحمد بن حميد',
           'سعد الغامدي',
           'ماهر المعيقلي'
         ];
 
+        const normalizeArabic = (str: string) => {
+          return str
+            .replace(/[أإآا]/g, 'ا')
+            .replace(/ى/g, 'ي')
+            .replace(/ة/g, 'ه')
+            .replace(/[\u064B-\u065F\u0670-\u0678]/g, '');
+        };
+
+        const getPriorityReciterId = (name: string, recitersList: any[]) => {
+          const normQuery = normalizeArabic(name);
+          let found = recitersList.find((r: any) => normalizeArabic(r.name).includes(normQuery));
+          if (found) return found.id;
+
+          // Custom fallbacks for specific names
+          if (name.includes('أحمد بن طالب حميد')) {
+            found = recitersList.find((r: any) => {
+              const n = normalizeArabic(r.name);
+              return (n.includes('احمد بن طالب') && n.includes('حميد')) || (n.includes('احمد طالب') && n.includes('حميد')) || n.includes('احمد بن طالب');
+            });
+          } else if (name.includes('عبدالله الموسى')) {
+            found = recitersList.find((r: any) => {
+              const n = normalizeArabic(r.name);
+              return n.includes('عبد الله الموسي') || n.includes('عبدالله الموسي') || n.includes('الموسي');
+            });
+          } else if (name.includes('الطبلاوي')) {
+            found = recitersList.find((r: any) => normalizeArabic(r.name).includes('طبلاوي'));
+          } else if (name.includes('الحذيفي')) {
+            found = recitersList.find((r: any) => normalizeArabic(r.name).includes('حذيفي'));
+          } else if (name.includes('جبريل')) {
+            found = recitersList.find((r: any) => normalizeArabic(r.name).includes('جبريل'));
+          } else if (name.includes('أيوب')) {
+            found = recitersList.find((r: any) => normalizeArabic(r.name).includes('ايوب'));
+          } else if (name.includes('اللحيدان')) {
+            found = recitersList.find((r: any) => normalizeArabic(r.name).includes('لحيدان'));
+          } else if (name.includes('القطامي')) {
+            found = recitersList.find((r: any) => normalizeArabic(r.name).includes('قطامي'));
+          }
+          return found?.id;
+        };
+
         const priorityIds = priorityArabicNames.map(name => 
-          arData.reciters.find((r: any) => r.name.includes(name))?.id
+          getPriorityReciterId(name, arData.reciters)
         ).filter(id => id !== undefined);
 
         // Prepend Sheikh Rashad Darwish virtual ID (90004) to the absolute top of the list!
@@ -428,6 +473,13 @@ export default function App() {
               m.id === 2
             ) || null;
           } else {
+            // First check if there is a studio recording (تسجيل استوديو)
+            const studio = r.moshaf.find((m: any) =>
+              m.name.includes('استوديو') ||
+              m.name.toLowerCase().includes('studio')
+            );
+            if (studio) return studio;
+
             const murattal = r.moshaf.find((m: any) => 
               m.name.includes('مرتل') || 
               m.name.toLowerCase().includes('murattal') || 
@@ -453,13 +505,25 @@ export default function App() {
           const isMustafaIsmail = r.id === 120 || r.name.includes('مصطفى إسماعيل') || r.name.includes('مصطفي') || r.name.toLowerCase().includes('mustafa') || r.name.toLowerCase().includes('moustafa');
           const isBanna = r.id === 117 || r.name.includes('البنا') || r.name.toLowerCase().includes('banna');
 
-          if (isMinshawi || isAbdulBasit || isHusary || isMustafaIsmail || isBanna) {
+          const isQatami = r.id === 37 || r.name.includes('القطامي') || r.name.toLowerCase().includes('qatami');
+          const isHameed = r.id === 138 || r.name.includes('طالب حميد') || r.name.includes('حميد') || r.name.toLowerCase().includes('talib') || r.name.toLowerCase().includes('hameed');
+          const isLuhaidan = r.id === 7 || r.name.includes('اللحيدان') || r.name.toLowerCase().includes('luhaidan') || r.name.toLowerCase().includes('lohaidan');
+          const isHuthaifi = r.id === 114 || r.name.includes('الحذيفي') || r.name.toLowerCase().includes('hudhaify') || r.name.toLowerCase().includes('huthaifi');
+          const isTablawi = r.id === 52 || r.name.includes('الطبلاوي') || r.name.toLowerCase().includes('tablawi') || r.name.toLowerCase().includes('tablaway');
+          const isJibreel = r.id === 50 || r.name.includes('جبريل') || r.name.toLowerCase().includes('jibreel') || r.name.toLowerCase().includes('jebril');
+          const isAyoub = r.id === 118 || r.name.includes('أيوب') || r.name.includes('ايوب') || r.name.toLowerCase().includes('ayyoub') || r.name.toLowerCase().includes('ayoub');
+          const isMousa = r.id === 145 || r.name.includes('الموسى') || r.name.toLowerCase().includes('mousa');
+
+          const isDualReciter = isMinshawi || isAbdulBasit || isHusary || isMustafaIsmail || isBanna ||
+                                isQatami || isHameed || isLuhaidan || isHuthaifi || isTablawi || isJibreel || isAyoub || isMousa;
+
+          if (isDualReciter) {
             const tajweedM = getMoshafByType(r, 'tajweed');
             const murattalM = getMoshafByType(r, 'murattal');
 
-            if (isMinshawi || isAbdulBasit) {
-              // Base ID plays Mujawwad, Virtual ID (+100000) plays Murattal
-              if (tajweedM) {
+            if (tajweedM && murattalM) {
+              if (isMinshawi || isAbdulBasit) {
+                // Base ID plays Mujawwad, Virtual ID (+100000) plays Murattal
                 allReciters.push({
                   id: r.id,
                   name: r.name + (language === 'ar' ? ' (مجود)' : ' (Mujawwad)'),
@@ -467,33 +531,39 @@ export default function App() {
                   surahs: tajweedM.surah_list,
                   letter: r.letter
                 });
-              }
-              if (murattalM) {
                 allReciters.push({
                   id: r.id + 100000,
-                  name: r.name + (language === 'ar' ? ' (مرتل)' : ' (Murattal)'),
+                  name: r.name + (language === 'ar' ? ' (مرتل / استوديو)' : ' (Murattal / Studio)'),
                   server: murattalM.server,
                   surahs: murattalM.surah_list,
+                  letter: r.letter
+                });
+              } else {
+                // Base ID plays Murattal / Studio, Virtual ID (+100000) plays Mujawwad
+                allReciters.push({
+                  id: r.id,
+                  name: r.name + (language === 'ar' ? ' (مرتل / استوديو)' : ' (Murattal / Studio)'),
+                  server: murattalM.server,
+                  surahs: murattalM.surah_list,
+                  letter: r.letter
+                });
+                allReciters.push({
+                  id: r.id + 100000,
+                  name: r.name + (language === 'ar' ? ' (مجود)' : ' (Mujawwad)'),
+                  server: tajweedM.server,
+                  surahs: tajweedM.surah_list,
                   letter: r.letter
                 });
               }
             } else {
-              // Base ID plays Murattal, Virtual ID (+100000) plays Mujawwad
-              if (murattalM) {
+              const singleM = murattalM || tajweedM || r.moshaf[0];
+              if (singleM) {
+                const isTaj = singleM === tajweedM;
                 allReciters.push({
                   id: r.id,
-                  name: r.name + (language === 'ar' ? ' (مرتل)' : ' (Murattal)'),
-                  server: murattalM.server,
-                  surahs: murattalM.surah_list,
-                  letter: r.letter
-                });
-              }
-              if (tajweedM) {
-                allReciters.push({
-                  id: r.id + 100000,
-                  name: r.name + (language === 'ar' ? ' (مجود)' : ' (Mujawwad)'),
-                  server: tajweedM.server,
-                  surahs: tajweedM.surah_list,
+                  name: r.name + (isTaj ? (language === 'ar' ? ' (مجود)' : ' (Mujawwad)') : (language === 'ar' ? ' (مرتل / استوديو)' : ' (Murattal / Studio)')),
+                  server: singleM.server,
+                  surahs: singleM.surah_list,
                   letter: r.letter
                 });
               }
