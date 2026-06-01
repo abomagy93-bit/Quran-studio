@@ -233,7 +233,7 @@ export default function App() {
   // Fetch reciters
   useEffect(() => {
     const fetchReciters = async () => {
-      const cacheKey = `reciters_${language}`;
+      const cacheKey = `reciters_${language}_v3`;
       const cachedData = localStorage.getItem(cacheKey);
       const cacheTime = localStorage.getItem(`${cacheKey}_time`);
       
@@ -275,9 +275,10 @@ export default function App() {
           arData.reciters.find((r: any) => r.name.includes(name))?.id
         ).filter(id => id !== undefined);
 
-        // Explicitly add Minshawi (54) and Abdul Basit (44) to priority if not found
-        if (!priorityIds.includes(54)) priorityIds.push(54);
-        if (!priorityIds.includes(44)) priorityIds.push(44);
+        // Explicitly add requested key reciters to top priority
+        [54, 44, 115, 120, 117].forEach(id => {
+          if (!priorityIds.includes(id)) priorityIds.push(id);
+        });
 
         let displayReciters = arData.reciters;
 
@@ -287,53 +288,121 @@ export default function App() {
           displayReciters = langData.reciters;
         }
 
-        const allReciters: Reciter[] = displayReciters.map((r: any) => {
-          // Default to the first moshaf
-          let selectedMoshaf = r.moshaf[0];
-
-          // Special case for El-Minshawi: Force Tajweed version
-          // Minshawi's ID is 54 in MP3Quran API
-          if (r.id === 54 || r.name.includes('المنشاوي') || r.name.includes('Minshawi')) {
-            const tajweed = r.moshaf.find((m: any) => 
+        const getMoshafByType = (r: any, type: 'tajweed' | 'murattal') => {
+          if (!r.moshaf || r.moshaf.length === 0) return null;
+          if (type === 'tajweed') {
+            return r.moshaf.find((m: any) => 
               m.name.includes('تجويد') || 
               m.name.includes('مجود') ||
               m.name.toLowerCase().includes('tajweed') ||
-              m.moshaf_type === 2 || // Some versions use moshaf_type
-              m.id === 2 // Common ID for Tajweed
-            );
-            if (tajweed) selectedMoshaf = tajweed;
-          }
-
-          // Also for Abdul Basit (ID 44)
-          if (r.id === 44 || r.name.includes('عبدالباسط') || r.name.includes('Abdul Basit')) {
-            const tajweed = r.moshaf.find((m: any) => 
-              m.name.includes('تجويد') || 
-              m.name.includes('مجود') ||
-              m.name.toLowerCase().includes('tajweed') ||
+              m.name.toLowerCase().includes('mujawwad') ||
               m.moshaf_type === 2 ||
               m.id === 2
+            ) || null;
+          } else {
+            const murattal = r.moshaf.find((m: any) => 
+              m.name.includes('مرتل') || 
+              m.name.toLowerCase().includes('murattal') || 
+              m.name.toLowerCase().includes('murottal') ||
+              m.moshaf_type === 1
             );
-            if (tajweed) selectedMoshaf = tajweed;
+            if (murattal) return murattal;
+            
+            // Fallback to any non-tajweed moshaf
+            const nonTajweed = r.moshaf.find((m: any) => 
+              !(m.name.includes('تجويد') || m.name.includes('مجود') || m.name.toLowerCase().includes('tajweed') || m.name.toLowerCase().includes('mujawwad') || m.moshaf_type === 2)
+            );
+            return nonTajweed || r.moshaf[0];
           }
+        };
 
-          const isTajweed = selectedMoshaf?.name.includes('تجويد') || 
-                           selectedMoshaf?.name.includes('مجود') || 
-                           selectedMoshaf?.name.toLowerCase().includes('tajweed');
+        const allReciters: Reciter[] = [];
+        
+        displayReciters.forEach((r: any) => {
+          const isMinshawi = r.id === 54 || r.name.includes('المنشاوي') || r.name.toLowerCase().includes('minshawi');
+          const isAbdulBasit = r.id === 44 || r.name.includes('عبدالباسط') || r.name.includes('عبد الباسط') || r.name.toLowerCase().includes('abdul') || r.name.toLowerCase().includes('abdel');
+          const isHusary = r.id === 115 || r.name.includes('الحصري') || r.name.toLowerCase().includes('husary') || r.name.toLowerCase().includes('hosary');
+          const isMustafaIsmail = r.id === 120 || r.name.includes('مصطفى إسماعيل') || r.name.includes('مصطفي') || r.name.toLowerCase().includes('mustafa') || r.name.toLowerCase().includes('moustafa');
+          const isBanna = r.id === 117 || r.name.includes('البنا') || r.name.toLowerCase().includes('banna');
 
-          return {
-            id: r.id,
-            name: r.name + (isTajweed ? (language === 'ar' ? ' (تجويد)' : ' (Tajweed)') : ''),
-            server: selectedMoshaf?.server || '',
-            surahs: selectedMoshaf?.surah_list || '',
-            letter: r.letter
-          };
+          if (isMinshawi || isAbdulBasit || isHusary || isMustafaIsmail || isBanna) {
+            const tajweedM = getMoshafByType(r, 'tajweed');
+            const murattalM = getMoshafByType(r, 'murattal');
+
+            if (isMinshawi || isAbdulBasit) {
+              // Base ID plays Mujawwad, Virtual ID (+100000) plays Murattal
+              if (tajweedM) {
+                allReciters.push({
+                  id: r.id,
+                  name: r.name + (language === 'ar' ? ' (مجود)' : ' (Mujawwad)'),
+                  server: tajweedM.server,
+                  surahs: tajweedM.surah_list,
+                  letter: r.letter
+                });
+              }
+              if (murattalM) {
+                allReciters.push({
+                  id: r.id + 100000,
+                  name: r.name + (language === 'ar' ? ' (مرتل)' : ' (Murattal)'),
+                  server: murattalM.server,
+                  surahs: murattalM.surah_list,
+                  letter: r.letter
+                });
+              }
+            } else {
+              // Base ID plays Murattal, Virtual ID (+100000) plays Mujawwad
+              if (murattalM) {
+                allReciters.push({
+                  id: r.id,
+                  name: r.name + (language === 'ar' ? ' (مرتل)' : ' (Murattal)'),
+                  server: murattalM.server,
+                  surahs: murattalM.surah_list,
+                  letter: r.letter
+                });
+              }
+              if (tajweedM) {
+                allReciters.push({
+                  id: r.id + 100000,
+                  name: r.name + (language === 'ar' ? ' (مجود)' : ' (Mujawwad)'),
+                  server: tajweedM.server,
+                  surahs: tajweedM.surah_list,
+                  letter: r.letter
+                });
+              }
+            }
+          } else {
+            const selectedMoshaf = r.moshaf[0];
+            const isTajweed = selectedMoshaf?.name.includes('تجويد') || 
+                             selectedMoshaf?.name.includes('مجود') || 
+                             selectedMoshaf?.name.toLowerCase().includes('tajweed');
+
+            allReciters.push({
+              id: r.id,
+              name: r.name + (isTajweed ? (language === 'ar' ? ' (مجود)' : ' (Mujawwad)') : ''),
+              server: selectedMoshaf?.server || '',
+              surahs: selectedMoshaf?.surah_list || '',
+              letter: r.letter
+            });
+          }
         });
 
         const sorted = [...allReciters].sort((a, b) => {
-          const aPriority = priorityIds.indexOf(a.id);
-          const bPriority = priorityIds.indexOf(b.id);
+          const aBaseId = a.id >= 100000 ? a.id - 100000 : a.id;
+          const bBaseId = b.id >= 100000 ? b.id - 100000 : b.id;
+          const aPriority = priorityIds.indexOf(aBaseId);
+          const bPriority = priorityIds.indexOf(bBaseId);
           
-          if (aPriority !== -1 && bPriority !== -1) return aPriority - bPriority;
+          if (aPriority !== -1 && bPriority !== -1) {
+            if (aPriority === bPriority) {
+              // Same reciter: place Murattal (مرتل) first, then Mujawwad
+              const aIsMurattal = a.name.includes('مرتل') || a.name.includes('Murattal');
+              const bIsMurattal = b.name.includes('مرتل') || b.name.includes('Murattal');
+              if (aIsMurattal && !bIsMurattal) return -1;
+              if (!aIsMurattal && bIsMurattal) return 1;
+              return a.id - b.id;
+            }
+            return aPriority - bPriority;
+          }
           if (aPriority !== -1) return -1;
           if (bPriority !== -1) return 1;
           return a.name.localeCompare(b.name, language === 'ar' ? 'ar' : 'en');
